@@ -1,0 +1,22 @@
+[Unit]
+Description=Lighten012-Pilot System Monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+WorkingDirectory=/opt/lighten012-pilot
+Environment=PILOT_LISTEN=127.0.0.1:8080
+ExecStart=/opt/lighten012-pilot/bin/pilot -listen ${PILOT_LISTEN} -web /opt/lighten012-pilot/web/dist
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+
+[Install]
+WantedBy=multi-user.target
