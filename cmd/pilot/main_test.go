@@ -18,7 +18,7 @@ func TestHealthAndAPIBoundary(t *testing.T) {
 	for _, tc := range []struct {
 		method, path string
 		status       int
-	}{{"POST", "/api/health", http.StatusNotFound}, {"POST", "/api/network/apply", http.StatusNotFound}, {"GET", "/api/missing", http.StatusNotFound}} {
+	}{{"POST", "/api/health", http.StatusNotFound}, {"POST", "/api/network/apply", http.StatusForbidden}, {"GET", "/api/missing", http.StatusNotFound}} {
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, httptest.NewRequest(tc.method, tc.path, nil))
 		if w.Code != tc.status {

@@ -1,0 +1,28 @@
+[Unit]
+Description=Lighten012-Pilot privileged network configuration helper
+After=networking.service
+Before=lighten012-pilot.service
+
+[Service]
+Type=simple
+User=root
+Group=pilot-net
+Environment=PILOT_PROTECTED_INTERFACES=
+ExecStart=/opt/lighten012-pilot/bin/pilot-netd -protected=${PILOT_PROTECTED_INTERFACES}
+RuntimeDirectory=pilot-netd
+RuntimeDirectoryMode=0750
+StateDirectory=pilot-netd
+StateDirectoryMode=0700
+Restart=on-failure
+RestartSec=3
+# Keep ifupdown-spawned DHCP clients alive across helper restarts.
+KillMode=process
+NoNewPrivileges=yes
+ProtectHome=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=/etc/network /run /var/lib/pilot-netd -/var/lib/dhcpcd -/var/lib/dhcp -/etc/resolv.conf
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK AF_PACKET
+
+[Install]
+WantedBy=multi-user.target

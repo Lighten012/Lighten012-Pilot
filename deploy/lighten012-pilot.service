@@ -1,11 +1,14 @@
 [Unit]
-Description=Lighten012-Pilot System Monitor
+Description=Lighten012-Pilot Web Control Panel
 After=network-online.target
 Wants=network-online.target
+Wants=pilot-netd.service
+After=pilot-netd.service
 
 [Service]
 Type=simple
 DynamicUser=yes
+SupplementaryGroups=pilot-net
 WorkingDirectory=/opt/lighten012-pilot
 Environment=PILOT_LISTEN=127.0.0.1:8080
 ExecStart=/opt/lighten012-pilot/bin/pilot -listen ${PILOT_LISTEN} -web /opt/lighten012-pilot/web/dist

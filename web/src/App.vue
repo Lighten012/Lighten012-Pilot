@@ -24,6 +24,9 @@ import {
 } from "lucide-vue-next";
 import { getHealth, getMonitor, type Health, type Sample } from "./api";
 import { features } from "./catalog";
+import NetworkPage from "./components/NetworkPage.vue";
+import ServicesPage from "./components/ServicesPage.vue";
+import FirewallPage from "./components/FirewallPage.vue";
 const page = ref("overview"),
   health = ref<Health | null>(null),
   sample = ref<Sample | null>(null),
@@ -38,20 +41,28 @@ let timer: ReturnType<typeof setInterval> | undefined,
 const navigation = [
   { id: "overview", label: "总览", icon: LayoutDashboard },
   { id: "monitor", label: "系统监控", icon: Activity },
+  { id: "network", label: "WAN / LAN", icon: Network },
+  { id: "services", label: "DHCP 与 DNS", icon: Globe },
+  { id: "firewall", label: "防火墙与 NAT", icon: Shield },
   { id: "features", label: "功能规划", icon: Layers },
 ];
-const pending = [
-  { label: "网络配置", icon: Network, id: "network" },
-  { label: "DHCP 与 DNS", icon: Globe, id: "dhcp" },
-  { label: "防火墙", icon: Shield, id: "firewall" },
-  { label: "系统管理", icon: Settings2, id: "backup" },
-];
+const pending = [{ label: "系统管理", icon: Settings2, id: "backup" }];
+const implemented = ["monitor", "network", "dhcp", "dns", "firewall"];
+function featurePage(id: string) {
+  return ["dhcp", "dns"].includes(id) ? "services" : id;
+}
 const title = computed(() =>
   page.value === "overview"
     ? "网络，一目了然。"
     : page.value === "monitor"
       ? "观察每一次变化。"
-      : "从基础，逐步构建。",
+      : page.value === "network"
+        ? "让网络，按你的方式连接。"
+        : page.value === "services"
+          ? "地址有序，解析随心。"
+          : page.value === "firewall"
+            ? "连接有边界，上网有秩序。"
+            : "从基础，逐步构建。",
 );
 const current = computed(() => sample.value?.history.at(-1));
 const points = computed(() => sample.value?.history.slice(-range.value) || []);
@@ -164,7 +175,7 @@ onUnmounted(() => {
           </button>
         </div>
         <div class="version">
-          <span>LIGHTEN012-PILOT</span><span>v0.1.0 · 开发版</span>
+          <span>LIGHTEN012-PILOT</span><span>v0.4.0 · 开发版</span>
         </div>
       </div>
     </aside>
@@ -182,7 +193,7 @@ onUnmounted(() => {
           ><button
             class="icon-button"
             aria-label="关于此版本"
-            @click="notify('v0.1.0 · 系统监控已实现，路由配置功能尚未启用。')"
+            @click="notify('v0.4.0 · 已加入 iptables 转发防火墙与 NAT。')"
           >
             <CircleHelp :size="19" /></button
           ><span class="avatar">P</span>
@@ -220,7 +231,10 @@ onUnmounted(() => {
               : "页面暂不显示任何虚构数据。"
           }}<button @click="refresh">重试</button>
         </div>
-        <template v-if="page !== 'features'">
+        <NetworkPage v-if="page === 'network'" />
+        <ServicesPage v-else-if="page === 'services'" />
+        <FirewallPage v-else-if="page === 'firewall'" />
+        <template v-else-if="page !== 'features'">
           <section class="hero-grid">
             <div class="network-hero">
               <div class="hero-top">
@@ -254,7 +268,7 @@ onUnmounted(() => {
                 </div>
               </div>
               <div class="hero-foot">
-                <span>拓扑为规划示意，尚未启用路由转发</span
+                <span>拓扑为规划示意，实际转发状态见防火墙与 NAT</span
                 ><ArrowUpRight :size="17" />
               </div>
             </div>
@@ -486,7 +500,7 @@ onUnmounted(() => {
                     sample?.interfaces.length || 0
                   }}</span>
                 </h3>
-                <span class="subtle">自动发现 · 未分配 WAN / LAN</span>
+                <span class="subtle">自动发现 · 角色配置见 WAN / LAN</span>
               </div>
               <div class="table-scroll">
                 <table>
@@ -550,24 +564,30 @@ onUnmounted(() => {
         <template v-else
           ><div class="roadmap-banner">
             <div>
-              <span class="tiny-dot"></span>当前阶段 · 01
-              <h2>先把系统看清楚。</h2>
-              <p>已选择系统监控作为第一个模块。其余功能保持规划状态。</p>
+              <span class="tiny-dot"></span>当前阶段 · 04
+              <h2>从观察，走向管理。</h2>
+              <p>系统监控、WAN/LAN、DHCP、DNS、防火墙与 NAT 已实现。</p>
             </div>
-            <span class="roadmap-count">01 <small>/ 08</small></span>
+            <span class="roadmap-count">05 <small>/ 08</small></span>
           </div>
           <div class="feature-grid">
             <button
               v-for="f in features"
               :key="f.id"
-              :class="['panel feature-card', { chosen: f.id === 'monitor' }]"
+              :class="[
+                'panel feature-card',
+                { chosen: implemented.includes(f.id) },
+              ]"
               @click="detail = f"
             >
               <div class="feature-top">
                 <span class="feature-group">{{ f.group }}</span
                 ><span
-                  :class="['small-badge', { green: f.id === 'monitor' }]"
-                  >{{ f.id === "monitor" ? "已实现" : "规划中" }}</span
+                  :class="[
+                    'small-badge',
+                    { green: implemented.includes(f.id) },
+                  ]"
+                  >{{ implemented.includes(f.id) ? "已实现" : "规划中" }}</span
                 >
               </div>
               <h3>{{ f.name }}<ArrowUpRight :size="18" /></h3>
@@ -582,7 +602,7 @@ onUnmounted(() => {
           <span
             ><span class="tiny-dot"></span> LIGHTEN012-PILOT ·
             为自己的网络而构建</span
-          ><span>Go + Vue · 系统监控 v0.1</span>
+          ><span>Go + Vue · 网络服务 v0.4</span>
         </footer>
       </main>
     </div>
@@ -606,7 +626,7 @@ onUnmounted(() => {
           <X :size="20" /></button
         ><span class="section-kicker"
           >{{ detail.group }} ·
-          {{ detail.id === "monitor" ? "已实现" : "功能规划" }}</span
+          {{ implemented.includes(detail.id) ? "已实现" : "功能规划" }}</span
         >
         <h2>{{ detail.name }}</h2>
         <p>{{ detail.desc }}</p>
@@ -616,20 +636,20 @@ onUnmounted(() => {
         </div>
         <p class="subtle">
           {{
-            detail.id === "monitor"
-              ? "监控数据来自当前 Linux 主机，只读采集。"
+            implemented.includes(detail.id)
+              ? "功能已实现，可从工作空间导航进入。"
               : "当前版本尚未实现该模块，不会修改系统配置。"
           }}
         </p>
         <button
           class="button primary"
           @click="
-            detail.id === 'monitor'
-              ? ((page = 'monitor'), (detail = null))
+            implemented.includes(detail.id)
+              ? ((page = featurePage(detail.id)), (detail = null))
               : (detail = null)
           "
         >
-          {{ detail.id === "monitor" ? "打开系统监控" : "了解了"
+          {{ implemented.includes(detail.id) ? "打开功能" : "了解了"
           }}<ArrowRight :size="16" />
         </button>
       </section>
