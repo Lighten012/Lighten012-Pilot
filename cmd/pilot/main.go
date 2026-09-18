@@ -35,7 +35,7 @@ func handler(webDir, socket string) http.Handler {
 		hostname, _ := os.Hostname()
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok", "version": "0.4.0", "mode": "prototype", "hostname": hostname, "architecture": runtime.GOARCH, "os": runtime.GOOS})
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok", "version": "0.5.0", "mode": "prototype", "hostname": hostname, "architecture": runtime.GOARCH, "os": runtime.GOOS})
 	})
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "API not implemented", http.StatusNotFound)

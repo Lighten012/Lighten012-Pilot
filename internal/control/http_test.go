@@ -11,6 +11,22 @@ import (
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+func TestLogQueryProxy(t *testing.T) {
+	s := New("/unused")
+	s.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/logs" || r.URL.Query().Get("search") != "one & two" || r.URL.Query().Get("cursor") != "s=1;i=2" {
+			t.Fatal(r.URL)
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"entries":[]}`)), Header: make(http.Header)}, nil
+	})
+	mux := http.NewServeMux()
+	s.Register(mux)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, httptest.NewRequest("GET", "http://pilot.test/api/logs?search=one%20%26%20two&cursor=s%3D1%3Bi%3D2", nil))
+	if w.Code != 200 {
+		t.Fatal(w.Code)
+	}
+}
 func TestDirectManagementAndOrigin(t *testing.T) {
 	s := New("/unused")
 	calls := 0

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/Lighten012/Lighten012-Pilot/internal/network"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -94,6 +95,7 @@ func (m *Manager) restore(event string) error {
 	}
 	m.ready = true
 	m.event = event
+	log.Printf("防火墙: %s", event)
 	return nil
 }
 func (m *Manager) Enabled() bool {
@@ -175,6 +177,7 @@ func (m *Manager) Apply(req Plan) (string, error) {
 	}
 	m.ready = true
 	m.event = "已临时应用，请确认网络正常；超时自动回滚"
+	log.Printf("防火墙临时应用 enabled=%t nat=%t rules=%d forwards=%d", p.Config.Enabled, p.Config.NAT, len(p.Config.Rules), len(p.Config.Forwards))
 	return j.Pending.ID, nil
 }
 func (m *Manager) Confirm(id string) error {
@@ -194,6 +197,7 @@ func (m *Manager) Confirm(id string) error {
 		return e
 	}
 	m.event = "防火墙配置已确认并保存"
+	log.Print(m.event)
 	return nil
 }
 func (m *Manager) Rollback(id string) error {
@@ -222,6 +226,7 @@ func (m *Manager) State() (State, error) {
 		c = m.journal.Pending.Config
 	}
 	c.Rules = append([]Rule{}, c.Rules...)
+	c.Forwards = append([]Forward{}, c.Forwards...)
 	s := State{Config: c, Available: m.backend.Available() == nil, Ready: m.ready, Event: m.event, ServerTime: time.Now().UnixMilli()}
 	if m.journal.Pending != nil {
 		p := *m.journal.Pending

@@ -7,6 +7,7 @@ import (
 	"github.com/Lighten012/Lighten012-Pilot/internal/firewall"
 	"github.com/Lighten012/Lighten012-Pilot/internal/network"
 	"github.com/Lighten012/Lighten012-Pilot/internal/services"
+	"github.com/Lighten012/Lighten012-Pilot/internal/systemlogs"
 	"io"
 	"log"
 	"net"
@@ -67,6 +68,7 @@ func main() {
 		}
 	}()
 	mux := http.NewServeMux()
+	mux.Handle("GET /logs", systemlogs.Handler(systemlogs.Read))
 	reply := func(w http.ResponseWriter, v any, e error) {
 		w.Header().Set("Content-Type", "application/json")
 		if e != nil {
@@ -203,7 +205,26 @@ func main() {
 		log.Fatal(e)
 	}
 	log.Printf("Network helper listening on Unix socket %s", *socket)
-	log.Fatal((&http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 120 * time.Second}).Serve(listener))
+	log.Fatal((&http.Server{Handler: audit(mux), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 120 * time.Second}).Serve(listener))
+}
+
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusWriter) WriteHeader(status int) {
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+func audit(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sw := &statusWriter{ResponseWriter: w, status: 200}
+		next.ServeHTTP(sw, r)
+		if r.Method == "POST" {
+			log.Printf("管理操作 path=%s status=%d", r.URL.Path, sw.status)
+		}
+	})
 }
 func filepathDir(p string) string {
 	i := strings.LastIndex(p, "/")

@@ -47,6 +47,7 @@ def main():
             for n in (lan,wan):children.append(subprocess.Popen(['ip','netns','exec',n,'python3','-c',server],stdout=log,stderr=log))
             udp_server='import socket\ns=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.bind(("0.0.0.0",9002))\nwhile True:\n b,a=s.recvfrom(1024);s.sendto(a[0].encode(),a)'
             children.append(subprocess.Popen(['ip','netns','exec',wan,'python3','-c',udp_server],stdout=log,stderr=log))
+            children.append(subprocess.Popen(['ip','netns','exec',lan,'python3','-c',udp_server],stdout=log,stderr=log))
             time.sleep(.2);proc=start()
             c={'enabled':True,'nat':True,'defaultAction':'ACCEPT','wan':'','lan':'','subnet':'','rules':[]}
             apply(c)
@@ -65,6 +66,24 @@ def main():
             c['rules']=[{'enabled':True,'action':'DROP','protocol':'udp','source':'','destination':'','port':'9002-9003'}];apply(c)
             assert ns(lan,'python3','-c',udp_client).strip()=='BLOCKED'
             print('PASS: actual UDP NAT and UDP port-range filtering')
+            c['forwards']=[{'enabled':True,'protocol':'tcp','externalPort':19000,'target':'10.233.0.2','internalPort':9000,'source':'10.234.0.1'}, {'enabled':True,'protocol':'udp','externalPort':19000,'target':'10.233.0.2','internalPort':9002,'source':''}]
+            apply(c)
+            assert connect(wan,'10.234.0.2',19000)=='10.234.0.1'
+            udp_forward=udp_client.replace('10.234.0.1','10.234.0.2').replace('9002','19000')
+            assert ns(wan,'python3','-c',udp_forward).strip()=='10.234.0.1'
+            connect(wan,'10.233.0.2',9000,blocked=True)
+            print('PASS: real WAN TCP/UDP DNAT to LAN; source preserved; direct WAN -> LAN still blocked')
+            denied=copy.deepcopy(c);denied['forwards'][0]['source']='10.234.0.99';apply(denied);connect(wan,'10.234.0.2',19000,blocked=True)
+            disabled=copy.deepcopy(c);disabled['forwards'][0]['enabled']=False;apply(disabled);connect(wan,'10.234.0.2',19000,blocked=True)
+            apply(c);tx=apply(disabled,False);api('firewall/rollback',tx);assert connect(wan,'10.234.0.2',19000)=='10.234.0.1'
+            proc.terminate();proc.wait();proc=start();assert connect(wan,'10.234.0.2',19000)=='10.234.0.1'
+            print('PASS: mapping source restriction, disable, rollback and restart persistence')
+            blocker=subprocess.Popen(['ip','netns','exec',router,'python3','-c','import socket,time;s=socket.socket();s.bind(("0.0.0.0",19000));s.listen();time.sleep(10)'],stdout=log,stderr=log);children.append(blocker);time.sleep(.2)
+            api('firewall/preview',c,409);blocker.terminate();blocker.wait()
+            duplicate=copy.deepcopy(c);duplicate['forwards'].append(duplicate['forwards'][0]);api('firewall/preview',duplicate,409)
+            badtarget=copy.deepcopy(c);badtarget['forwards'][0]['target']='10.233.0.1';api('firewall/preview',badtarget,409)
+            c['forwards']=[];apply(c)
+            print('PASS: listener conflicts, duplicate mappings and router-self targets rejected; mappings removed')
             c['rules']=[];c['defaultAction']='DROP';apply(c);connect(lan,'10.234.0.1',9001,blocked=True)
             c['defaultAction']='ACCEPT';c['nat']=False;apply(c);assert connect(lan,'10.234.0.1')=='10.233.0.2'
             print('PASS: default deny and routing without NAT')

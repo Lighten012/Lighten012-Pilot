@@ -1,6 +1,6 @@
 # Lighten012-Pilot
 
-Go + Vue 3 + TypeScript + Vite 构建的个人软路由管理项目。v0.4 提供系统监控、WAN/LAN IPv4 配置、DHCP、自定义 Go DNS，以及 iptables 转发防火墙与 NAT。
+Go + Vue 3 + TypeScript + Vite 构建的个人软路由管理项目。v0.5 提供系统监控、WAN/LAN IPv4 配置、DHCP、自定义 Go DNS、iptables 防火墙/NAT、端口转发及系统日志。
 
 ## 默认部署方式
 
@@ -36,6 +36,7 @@ internal/control/  请求来源校验、网络 API 代理
 internal/network/  ifupdown 配置与持久化变更事务
 internal/services/ Go DNS 解析逻辑、DHCP 进程及配置生命周期
 internal/firewall/ iptables 规则生成、NAT 与持久化回滚事务
+internal/systemlogs/ 受限 journal 查询、筛选与游标分页
 internal/monitor/   Linux 采样与计算测试
 web/src/            Vue 页面、API 类型与功能目录
 deploy/             systemd 服务文件
@@ -112,7 +113,7 @@ journalctl -u lighten012-pilot -n 50 --no-pager
 
 ## 后续功能
 
-DHCP/DNS、防火墙与 NAT 默认关闭，需在对应页面启用。启用 DHCP/DNS 和出口 NAT 后，LAN 客户端可以通过 Pilot 获取地址、解析域名和共享 WAN 出口。端口转发、日志和备份恢复仍处于规划状态。
+DHCP/DNS、防火墙与 NAT 默认关闭，需在对应页面启用。启用 DHCP/DNS 和出口 NAT 后，LAN 客户端可以通过 Pilot 获取地址、解析域名和共享 WAN 出口。配置备份恢复仍处于规划状态。
 
 本版不管理 IPv6、PPPoE、VLAN、网桥或多 WAN，也不支持迁移已确认的 WAN/LAN 接口角色；确认后可以继续修改原接口的地址设置。正式使用前仍需补充长期运行、完整主机重启和实际下游设备测试。
 
@@ -146,11 +147,25 @@ DHCP 目前不提供静态租约绑定和 DHCPv6。勿将手动设置的客户�
 3. 多条规则从上到下匹配，以首条启用且匹配的规则为准；支持上移、下移与停用。
 4. 校验并预览，点击“应用并开始测试”。在 LAN 客户端用新连接测试联网，90 秒内点击“网络正常，确认保留”。未确认、助手重启或应用失败会恢复旧配置。
 
-规则自动绑定已确认的 WAN/LAN，启用期间须先停用并确认才能修改网络。仅替换 `PILOT_FWD`、`PILOT_NAT` 专用链，不清空全局规则；已建立连接及返回流量放行，WAN 主动连接 LAN 被阻止。NAT 限定 LAN 网段经 WAN 出口的源地址伪装。本版不管理本机 INPUT/OUTPUT、IPv6 或 DNAT 端口映射，因此页面规则不会限制访问路由器自身的 SSH、Web、DNS/DHCP。已建立连接不会因新增阻止规则立即断开。
+规则自动绑定已确认的 WAN/LAN，启用期间须先停用并确认才能修改网络。仅替换 `PILOT_FWD`、`PILOT_NAT`、`PILOT_DNAT` 专用链，不清空全局规则；已建立连接及返回流量放行，WAN 仅能通过配置的映射连接 LAN。出口 NAT 限定 LAN 网段经 WAN 的源地址伪装。本版不管理本机 INPUT/OUTPUT 或 IPv6，因此转发过滤不会限制访问路由器自身的 SSH、Web、DNS/DHCP。已建立连接不会因新增阻止规则或停用映射立即断开；请用新连接测试。
 
 配置与未确认事务保存在 `/var/lib/pilot-netd/firewall/firewall.json`。确认配置由网络助手在启动时恢复；停用恢复首次启用前的 `net.ipv4.ip_forward` 值，保留其他系统规则。不要手动改动 Pilot 专用链；本版不持续检查外部工具造成的规则漂移。
 
 实现参考：[iptables-restore 手册](https://man7.org/linux/man-pages/man8/iptables-restore.8.html)、[iptables 扩展手册](https://man7.org/linux/man-pages/man8/iptables-extensions.8.html)。
+
+## 端口转发
+
+打开“端口转发”并添加映射，例如 TCP 外部端口 `18080` → LAN 设备 `192.168.60.100:80`。来源可留空（所有 WAN 来源）或填 IPv4/CIDR。只支持单个外部端口到单个内部端口；TCP/UDP 相同端口可分别映射，同一协议的启用映射不能重复占用外部端口。
+
+转发防火墙须启用，出口源 NAT 可按上网需要独立选择。校验并预览后应用，在 WAN 侧访问 `http://<Pilot-WAN-IP>:18080` 验证，90 秒内确认保留。防火墙、NAT、映射为一份配置，两页均会整体应用。目标设备必须使用 Pilot 作为返回网关；从 LAN 访问 WAN 地址的回环映射不在本版范围。Pilot 位于上游路由器之后时，公网访问还需上游路由器提供相应入口。
+
+预览拒绝映射到路由器自身、LAN 以外、网络地址或广播地址；启用时检查外部端口是否被本机 WAN/通配地址监听。该检查发生在应用前，不持续监控后来启动的本机服务。映射保存至既有防火墙配置，支持停用、删除、手动/超时回滚与重启恢复。
+
+## 系统日志
+
+系统日志页通过网络助手读取 `journalctl`，支持 Pilot 全部服务、Web 服务、网络助手、系统和内核来源；级别为全部、警告及以上、错误及以上，范围为最近 1 小时、24 小时或 7 天。关键词为普通文本，匹配消息和服务名。按时间倒序、每页 100 条；点击“加载更早日志”继续，分页保持查询时刻不变。自动刷新每 10 秒回到最新一页。可导出已加载记录为 UTF-8 文本，页面最多累计 2000 条。
+
+读取不会修改 journal 保留设置或清空日志；跨重启历史是否存在取决于系统 journald 配置。每次查询最多扫描 1000 条，稀疏关键词可能需要继续加载更早记录；每条消息展示上限 4096 字节并标注截断。API 为 `GET /api/logs`，接受受限来源、级别、范围、关键词、分页参数，不支持任意文件路径、命令或正则表达式。网络助手记录配置操作路径和结果，不记录提交的配置正文。
 
 ## 隔离网络集成测试
 
@@ -159,6 +174,7 @@ DHCP 目前不提供静态租约绑定和 DHCPv6。勿将手动设置的客户�
 ```sh
 sudo python3 tests/services_integration.py ./bin/pilot-netd
 sudo python3 tests/firewall_integration.py ./bin/pilot-netd # 另需 iptables
+sudo python3 tests/systemlogs_integration.py ./bin/pilot-netd # 向 journal 写入带唯一标记的有限测试记录
 sudo python3 tests/network_integration.py ./bin/pilot-netd
 sudo python3 tests/network_dhcp_integration.py ./bin/pilot-netd
 ```

@@ -27,6 +27,7 @@ import { features } from "./catalog";
 import NetworkPage from "./components/NetworkPage.vue";
 import ServicesPage from "./components/ServicesPage.vue";
 import FirewallPage from "./components/FirewallPage.vue";
+import LogsPage from "./components/LogsPage.vue";
 const page = ref("overview"),
   health = ref<Health | null>(null),
   sample = ref<Sample | null>(null),
@@ -44,10 +45,20 @@ const navigation = [
   { id: "network", label: "WAN / LAN", icon: Network },
   { id: "services", label: "DHCP 与 DNS", icon: Globe },
   { id: "firewall", label: "防火墙与 NAT", icon: Shield },
+  { id: "forward", label: "端口转发", icon: ArrowRight },
+  { id: "logs", label: "系统日志", icon: Terminal },
   { id: "features", label: "功能规划", icon: Layers },
 ];
 const pending = [{ label: "系统管理", icon: Settings2, id: "backup" }];
-const implemented = ["monitor", "network", "dhcp", "dns", "firewall"];
+const implemented = [
+  "monitor",
+  "network",
+  "dhcp",
+  "dns",
+  "firewall",
+  "forward",
+  "logs",
+];
 function featurePage(id: string) {
   return ["dhcp", "dns"].includes(id) ? "services" : id;
 }
@@ -62,7 +73,11 @@ const title = computed(() =>
           ? "地址有序，解析随心。"
           : page.value === "firewall"
             ? "连接有边界，上网有秩序。"
-            : "从基础，逐步构建。",
+            : page.value === "forward"
+              ? "把服务，连接到需要它的人。"
+              : page.value === "logs"
+                ? "从记录中，找到答案。"
+                : "从基础，逐步构建。",
 );
 const current = computed(() => sample.value?.history.at(-1));
 const points = computed(() => sample.value?.history.slice(-range.value) || []);
@@ -175,7 +190,7 @@ onUnmounted(() => {
           </button>
         </div>
         <div class="version">
-          <span>LIGHTEN012-PILOT</span><span>v0.4.0 · 开发版</span>
+          <span>LIGHTEN012-PILOT</span><span>v0.5.0 · 开发版</span>
         </div>
       </div>
     </aside>
@@ -193,7 +208,7 @@ onUnmounted(() => {
           ><button
             class="icon-button"
             aria-label="关于此版本"
-            @click="notify('v0.4.0 · 已加入 iptables 转发防火墙与 NAT。')"
+            @click="notify('v0.5.0 · 已加入端口转发与系统日志。')"
           >
             <CircleHelp :size="19" /></button
           ><span class="avatar">P</span>
@@ -233,7 +248,12 @@ onUnmounted(() => {
         </div>
         <NetworkPage v-if="page === 'network'" />
         <ServicesPage v-else-if="page === 'services'" />
-        <FirewallPage v-else-if="page === 'firewall'" />
+        <FirewallPage
+          v-else-if="page === 'firewall' || page === 'forward'"
+          :key="page"
+          :forwarding="page === 'forward'"
+        />
+        <LogsPage v-else-if="page === 'logs'" />
         <template v-else-if="page !== 'features'">
           <section class="hero-grid">
             <div class="network-hero">
@@ -564,11 +584,11 @@ onUnmounted(() => {
         <template v-else
           ><div class="roadmap-banner">
             <div>
-              <span class="tiny-dot"></span>当前阶段 · 04
+              <span class="tiny-dot"></span>当前阶段 · 05
               <h2>从观察，走向管理。</h2>
-              <p>系统监控、WAN/LAN、DHCP、DNS、防火墙与 NAT 已实现。</p>
+              <p>已实现网络管理、DHCP/DNS、防火墙、端口转发与系统日志。</p>
             </div>
-            <span class="roadmap-count">05 <small>/ 08</small></span>
+            <span class="roadmap-count">07 <small>/ 08</small></span>
           </div>
           <div class="feature-grid">
             <button
@@ -602,7 +622,7 @@ onUnmounted(() => {
           <span
             ><span class="tiny-dot"></span> LIGHTEN012-PILOT ·
             为自己的网络而构建</span
-          ><span>Go + Vue · 网络服务 v0.4</span>
+          ><span>Go + Vue · 网络服务 v0.5</span>
         </footer>
       </main>
     </div>

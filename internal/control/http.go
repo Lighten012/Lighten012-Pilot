@@ -40,8 +40,12 @@ func mutationAllowed(r *http.Request) bool {
 }
 
 func (s *Server) Register(mux *http.ServeMux) {
-	for _, route := range []struct{ method, path string }{{"GET", "state"}, {"POST", "preview"}, {"POST", "draft"}, {"POST", "apply"}, {"POST", "confirm"}, {"POST", "rollback"}, {"GET", "services/state"}, {"POST", "services/preview"}, {"POST", "services/apply"}, {"GET", "firewall/state"}, {"POST", "firewall/preview"}, {"POST", "firewall/apply"}, {"POST", "firewall/confirm"}, {"POST", "firewall/rollback"}} {
-		mux.HandleFunc(route.method+" /api/network/"+route.path, func(w http.ResponseWriter, r *http.Request) {
+	for _, route := range []struct{ method, path string }{{"GET", "logs"}, {"GET", "state"}, {"POST", "preview"}, {"POST", "draft"}, {"POST", "apply"}, {"POST", "confirm"}, {"POST", "rollback"}, {"GET", "services/state"}, {"POST", "services/preview"}, {"POST", "services/apply"}, {"GET", "firewall/state"}, {"POST", "firewall/preview"}, {"POST", "firewall/apply"}, {"POST", "firewall/confirm"}, {"POST", "firewall/rollback"}} {
+		path := "/api/network/" + route.path
+		if route.path == "logs" {
+			path = "/api/logs"
+		}
+		mux.HandleFunc(route.method+" "+path, func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != "GET" && !mutationAllowed(r) {
 				fail(w, 403, "请求来源无效")
 				return
@@ -51,7 +55,8 @@ func (s *Server) Register(mux *http.ServeMux) {
 				fail(w, 413, "请求过大")
 				return
 			}
-			req, e := http.NewRequestWithContext(r.Context(), r.Method, "http://unix/"+route.path, bytes.NewReader(body))
+			target := url.URL{Scheme: "http", Host: "unix", Path: "/" + route.path, RawQuery: r.URL.RawQuery}
+			req, e := http.NewRequestWithContext(r.Context(), r.Method, target.String(), bytes.NewReader(body))
 			if e != nil {
 				fail(w, 500, "无法创建管理请求")
 				return
@@ -66,7 +71,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.Header().Set("Cache-Control", "no-store")
 			w.WriteHeader(res.StatusCode)
-			io.Copy(w, io.LimitReader(res.Body, 1024*1024))
+			io.Copy(w, io.LimitReader(res.Body, 8*1024*1024))
 		})
 	}
 }

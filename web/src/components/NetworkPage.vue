@@ -401,7 +401,7 @@ onUnmounted(() => {
           </div>
           <p class="field-note">
             LAN 使用静态 IPv4，不设置默认网关。DHCP 地址分配、转发与 NAT
-            将在后续模块实现。
+            请在对应页面启用。
           </p>
         </section>
       </fieldset>

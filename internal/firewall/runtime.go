@@ -46,7 +46,7 @@ func (*Linux) Apply(c Config, baseline string) error {
 	if _, e := command(Render(c), "iptables-restore", "--wait", "5", "--noflush"); e != nil {
 		return e
 	}
-	for _, h := range [][3]string{{"filter", "FORWARD", "PILOT_FWD"}, {"nat", "POSTROUTING", "PILOT_NAT"}} {
+	for _, h := range [][3]string{{"filter", "FORWARD", "PILOT_FWD"}, {"nat", "POSTROUTING", "PILOT_NAT"}, {"nat", "PREROUTING", "PILOT_DNAT"}} {
 		if _, e := command("", "iptables", "-w", "5", "-t", h[0], "-C", h[1], "-j", h[2]); e != nil {
 			if _, e = command("", "iptables", "-w", "5", "-t", h[0], "-I", h[1], "1", "-j", h[2]); e != nil {
 				return e
@@ -70,6 +70,9 @@ func (*Linux) Apply(c Config, baseline string) error {
 	return os.WriteFile("/proc/sys/net/ipv4/ip_forward", []byte(value+"\n"), 0644)
 }
 func (*Linux) Check(c Config) error {
+	if e := checkListeners(c); e != nil {
+		return e
+	}
 	_, e := command(Render(c), "iptables-restore", "--wait", "5", "--noflush", "--test")
 	return e
 }

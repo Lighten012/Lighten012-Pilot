@@ -18,13 +18,23 @@ type Rule struct {
 	Port        string `json:"port"`
 }
 type Config struct {
-	Enabled       bool   `json:"enabled"`
-	NAT           bool   `json:"nat"`
-	DefaultAction string `json:"defaultAction"`
-	WAN           string `json:"wan"`
-	LAN           string `json:"lan"`
-	Subnet        string `json:"subnet"`
-	Rules         []Rule `json:"rules"`
+	Enabled       bool      `json:"enabled"`
+	NAT           bool      `json:"nat"`
+	DefaultAction string    `json:"defaultAction"`
+	WAN           string    `json:"wan"`
+	LAN           string    `json:"lan"`
+	Subnet        string    `json:"subnet"`
+	Rules         []Rule    `json:"rules"`
+	Forwards      []Forward `json:"forwards"`
+}
+
+type Forward struct {
+	Enabled      bool   `json:"enabled"`
+	Protocol     string `json:"protocol"`
+	ExternalPort int    `json:"externalPort"`
+	Target       string `json:"target"`
+	InternalPort int    `json:"internalPort"`
+	Source       string `json:"source"`
 }
 
 func Default() Config { return Config{DefaultAction: "ACCEPT", Rules: []Rule{}} }
@@ -46,6 +56,36 @@ func prefix(s string) (string, error) {
 }
 func Normalize(c Config) (Config, error) {
 	c.Rules = append([]Rule{}, c.Rules...)
+	c.Forwards = append([]Forward{}, c.Forwards...)
+	if len(c.Forwards) > 128 {
+		return c, fmt.Errorf("最多 128 条端口映射")
+	}
+	used := map[string]bool{}
+	for i := range c.Forwards {
+		f := &c.Forwards[i]
+		if f.Protocol != "tcp" && f.Protocol != "udp" {
+			return c, fmt.Errorf("端口映射只支持 TCP 或 UDP")
+		}
+		if f.ExternalPort < 1 || f.ExternalPort > 65535 || f.InternalPort < 1 || f.InternalPort > 65535 {
+			return c, fmt.Errorf("映射端口须在 1–65535")
+		}
+		a, e := netip.ParseAddr(strings.TrimSpace(f.Target))
+		if e != nil || !a.Is4() || !a.IsGlobalUnicast() || a.IsLoopback() || a.IsLinkLocalUnicast() {
+			return c, fmt.Errorf("映射目标须为有效 LAN IPv4 地址")
+		}
+		f.Target = a.String()
+		f.Source, e = prefix(strings.TrimSpace(f.Source))
+		if e != nil {
+			return c, e
+		}
+		key := fmt.Sprintf("%s/%d", f.Protocol, f.ExternalPort)
+		if f.Enabled && used[key] {
+			return c, fmt.Errorf("外部端口 %s 有重复的启用映射", key)
+		}
+		if f.Enabled {
+			used[key] = true
+		}
+	}
 	if c.DefaultAction != "ACCEPT" && c.DefaultAction != "DROP" {
 		return c, fmt.Errorf("默认策略只能是放行或阻止")
 	}
@@ -97,7 +137,7 @@ func Bind(c Config, s network.Status) (Config, error) {
 	if s.Pending != nil {
 		return c, fmt.Errorf("请先完成 WAN/LAN 配置确认")
 	}
-	if !c.Enabled {
+	if !c.Enabled && len(c.Forwards) == 0 {
 		return c, nil
 	}
 	if s.Saved == nil {
@@ -130,6 +170,26 @@ func Bind(c Config, s network.Status) (Config, error) {
 	c.WAN = w.Interface
 	c.LAN = l.Interface
 	c.Subnet = p.Masked().String()
+	for _, f := range c.Forwards {
+		a := netip.MustParseAddr(f.Target)
+		if !p.Contains(a) || a == p.Addr() || a == p.Masked().Addr() {
+			return c, fmt.Errorf("映射目标必须是 LAN 网段中的设备，不能是路由器或网络地址")
+		}
+		b := a.As4()
+		host := uint32(b[0])<<24 | uint32(b[1])<<16 | uint32(b[2])<<8 | uint32(b[3])
+		mask := uint32(0xffffffff) << uint(32-p.Bits())
+		if host|mask == 0xffffffff {
+			return c, fmt.Errorf("映射目标不能是广播地址")
+		}
+		for _, d := range s.Inventory.Devices {
+			for _, address := range d.Addresses {
+				ip, e := netip.ParsePrefix(address)
+				if e == nil && ip.Addr() == a {
+					return c, fmt.Errorf("映射目标不能是路由器自身地址")
+				}
+			}
+		}
+	}
 	return c, nil
 }
 
@@ -145,6 +205,16 @@ func Render(c Config) string {
 		b.WriteString(inbound + " -m conntrack --ctstate INVALID -j DROP\n")
 		b.WriteString(outbound + " -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT\n")
 		b.WriteString(inbound + " -d " + c.Subnet + " -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT\n")
+		for _, f := range c.Forwards {
+			if !f.Enabled {
+				continue
+			}
+			s := fmt.Sprintf("%s -p %s -d %s --dport %d", inbound, f.Protocol, f.Target, f.InternalPort)
+			if f.Source != "" {
+				s += " -s " + f.Source
+			}
+			b.WriteString(s + fmt.Sprintf(" -m conntrack --ctstate DNAT --ctorigdstport %d -j ACCEPT\n", f.ExternalPort))
+		}
 		for _, r := range c.Rules {
 			if !r.Enabled {
 				continue
@@ -172,6 +242,19 @@ func Render(c Config) string {
 	if c.Enabled && c.NAT {
 		b.WriteString("-A PILOT_NAT -s " + c.Subnet + " -o " + c.WAN + " -j MASQUERADE\n")
 	}
-	b.WriteString("-A PILOT_NAT -j RETURN\nCOMMIT\n")
+	b.WriteString("-A PILOT_NAT -j RETURN\n:PILOT_DNAT - [0:0]\n")
+	if c.Enabled {
+		for _, f := range c.Forwards {
+			if !f.Enabled {
+				continue
+			}
+			s := fmt.Sprintf("-A PILOT_DNAT -i %s -m addrtype --dst-type LOCAL -p %s --dport %d", c.WAN, f.Protocol, f.ExternalPort)
+			if f.Source != "" {
+				s += " -s " + f.Source
+			}
+			b.WriteString(s + fmt.Sprintf(" -j DNAT --to-destination %s:%d\n", f.Target, f.InternalPort))
+		}
+	}
+	b.WriteString("-A PILOT_DNAT -j RETURN\nCOMMIT\n")
 	return b.String()
 }
