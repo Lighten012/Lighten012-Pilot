@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -40,17 +41,21 @@ func mutationAllowed(r *http.Request) bool {
 }
 
 func (s *Server) Register(mux *http.ServeMux) {
-	for _, route := range []struct{ method, path string }{{"GET", "logs"}, {"GET", "state"}, {"POST", "preview"}, {"POST", "draft"}, {"POST", "apply"}, {"POST", "confirm"}, {"POST", "rollback"}, {"GET", "services/state"}, {"POST", "services/preview"}, {"POST", "services/apply"}, {"GET", "firewall/state"}, {"POST", "firewall/preview"}, {"POST", "firewall/apply"}, {"POST", "firewall/confirm"}, {"POST", "firewall/rollback"}} {
+	for _, route := range []struct{ method, path string }{{"GET", "backup/state"}, {"GET", "backup/export"}, {"POST", "backup/preview"}, {"POST", "backup/apply"}, {"POST", "backup/confirm"}, {"POST", "backup/rollback"}, {"GET", "logs"}, {"GET", "state"}, {"POST", "preview"}, {"POST", "draft"}, {"POST", "apply"}, {"POST", "confirm"}, {"POST", "rollback"}, {"GET", "services/state"}, {"POST", "services/preview"}, {"POST", "services/apply"}, {"GET", "firewall/state"}, {"POST", "firewall/preview"}, {"POST", "firewall/apply"}, {"POST", "firewall/confirm"}, {"POST", "firewall/rollback"}} {
 		path := "/api/network/" + route.path
-		if route.path == "logs" {
-			path = "/api/logs"
+		if route.path == "logs" || strings.HasPrefix(route.path, "backup/") {
+			path = "/api/" + route.path
 		}
 		mux.HandleFunc(route.method+" "+path, func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != "GET" && !mutationAllowed(r) {
 				fail(w, 403, "请求来源无效")
 				return
 			}
-			body, e := io.ReadAll(http.MaxBytesReader(w, r.Body, 65536))
+			limit := int64(65536)
+			if strings.HasPrefix(route.path, "backup/") {
+				limit = 262144
+			}
+			body, e := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
 			if e != nil {
 				fail(w, 413, "请求过大")
 				return

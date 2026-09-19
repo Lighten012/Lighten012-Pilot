@@ -1,29 +1,46 @@
 # Lighten012-Pilot
 
-Go + Vue 3 + TypeScript + Vite 构建的个人软路由管理项目。v0.5 提供系统监控、WAN/LAN IPv4 配置、DHCP、自定义 Go DNS、iptables 防火墙/NAT、端口转发及系统日志。
+基于最小 Debian 系统逐步构建的个人软路由，使用 **Go + Vue 3 + TypeScript + Vite** 提供 Web 管理界面。项目不依赖 OpenWrt，通过 Linux 现有网络能力实现自己的配置管理、DNS 解析逻辑与恢复机制。
 
-## 默认部署方式
+**当前版本：v0.6.0。** 最初规划的八项基础模块均已实现，已在 Debian 13 / x86_64 虚拟机部署和验证。适合个人内网使用及学习 Linux 网络管理；打开页面即可操作，没有管理员密钥或登录流程。
 
-- 页面：http://127.0.0.1:8080
-- 运行环境：Debian 13 / x86_64
-- 建议部署目录：`/opt/lighten012-pilot`
-- systemd 服务：`lighten012-pilot`
-- 服务使用 systemd DynamicUser 运行，无 root 权限。
-- 单人内网项目，打开页面即可管理，无管理员密钥或登录流程。
+[部署与构建](#部署与构建) · [第一次配置](#第一次配置) · [DNS 使用](#dhcp-与-dns-使用) · [备份恢复](#配置备份与恢复) · [常见问题](#常见问题) · [验证记录](VALIDATION.md) · [更新记录](CHANGELOG.md)
 
-## 已实现
+## 功能概览
+
+| 模块 | 已实现范围 |
+| --- | --- |
+| 系统监控 | CPU、内存、负载、运行时间、网卡地址、收发速率与短期趋势 |
+| WAN / LAN | WAN DHCP/静态 IPv4、LAN 静态 IPv4、草稿、预览、限时确认与回滚 |
+| DHCP | LAN 地址池、租期、网关与 DNS 下发、有效租约 |
+| DNS | Go 服务，精确 A/AAAA 本地记录覆盖，其他域名转发上游，UDP/TCP |
+| 防火墙与 NAT | iptables IPv4 转发过滤、顺序规则、出口 MASQUERADE |
+| 端口转发 | TCP/UDP 单端口映射、来源限制、冲突检测与开关 |
+| 系统日志 | systemd journal 来源/级别/时间/关键词筛选、分页、刷新及导出 |
+| 配置备份与恢复 | JSON 导出、导入校验、差异预览、整套恢复与持久化回滚 |
+
+## 工作方式
+
+```text
+浏览器（Vue） → Go Web 服务（pilot，非 root）
+                     ↓ Unix socket
+               网络助手（pilot-netd，root）
+                     ├─ ifupdown：接口地址与路由
+                     ├─ Go DNS：本地解析与上游转发
+                     ├─ dnsmasq：仅提供 DHCP
+                     ├─ iptables：转发过滤、NAT 与端口映射
+                     └─ journalctl / JSON 文件：日志读取与配置持久化
+```
+
+Web 服务使用 systemd DynamicUser；特权助手仅监听 `/run/pilot-netd/control.sock`，允许 `pilot-net` 组访问。修改请求检查同源 Origin 和 `X-Pilot-Request: 1`。管理页面按个人内网场景设计，请将监听地址配置为自己的管理网地址。
+
+## 监控数据口径
 
 - CPU 平均使用率：每两秒计算 `/proc/stat` 差值，排除 guest 的重复计数；idle 和 iowait 视为非忙碌时间。
 - 内存：`MemTotal - MemAvailable`，包含对可回收缓存的考虑，与简单 free 数值不同。
 - 系统运行时间、1/5/15 分钟负载、主机名、系统架构。
 - 非回环网卡名称、IPv4/IPv6 地址、链路状态和收发速率。
 - 内存中的最近 120 个采样点，约四分钟历史；服务重启后重新积累，不伪造历史。
-- 总览、系统监控、功能规划；刷新、暂停与恢复、时间范围选择、断连提示。
-- WAN/LAN 页面：选择接口，WAN DHCP/静态 IPv4，LAN 静态 IPv4。
-- 地址与网段校验、变更预览、保存草稿、临时应用、90 秒确认、手动及超时回滚。
-- 网络助手持久化回滚记录；助手重启后先恢复未确认的变更。可保护当前管理接口。
-- DHCP：LAN IPv4 地址池、租期、网关与 Pilot DNS 下发、有效租约列表。
-- DNS：精确 A/AAAA 本地记录、上游转发、UDP/TCP 53、查询与命中计数。
 
 接口速率单位为字节/秒，不是 bit/s，也不是宽带测速；所有非回环接口合计在桥接或多接口转发时可能重复计数。未自动判定 WAN/LAN。首页拓扑明确为规划示意。
 
@@ -37,15 +54,27 @@ internal/network/  ifupdown 配置与持久化变更事务
 internal/services/ Go DNS 解析逻辑、DHCP 进程及配置生命周期
 internal/firewall/ iptables 规则生成、NAT 与持久化回滚事务
 internal/systemlogs/ 受限 journal 查询、筛选与游标分页
+internal/backup/    版本化配置包、整套恢复与持久化回滚事务
 internal/monitor/   Linux 采样与计算测试
 web/src/            Vue 页面、API 类型与功能目录
 deploy/             systemd 服务文件
 tests/              Linux 隔离网络集成测试
 ```
 
-## 开发与构建
+## 部署与构建
 
-需要 Go 1.23+，Node.js 20.19+ 或 22.12+。监控后端需运行在 Linux，Windows/macOS 不具备所需的 `/proc` 数据源。
+运行与验证环境为 Debian 13 / x86_64，推荐两张网络接口分别连接上游和独立 LAN。虚拟机可使用虚拟网卡，宿主机不需要两张物理网卡。树莓派/ARM64 尚未做实际部署验证。
+
+构建需要 Go 1.23+（`go.mod` 指定 Go 1.24.4 工具链，允许自动下载时会选择相应工具链）、Node.js 20.19+ 或 22.12+。监控后端需运行在 Linux，Windows/macOS 不具备所需的 `/proc` 数据源。
+
+Debian 运行依赖：
+
+```sh
+sudo apt update
+sudo apt install git ca-certificates ifupdown iproute2 dhcpcd-base dnsmasq-base iptables
+```
+
+Go 和 Node.js 请预先安装满足上述要求的版本。已有 DHCP 客户端时可继续使用其受 ifupdown 支持的配置，不要同时启用多套网络管理器。只安装 `dnsmasq-base` 提供 DHCP 二进制，DNS 由 Pilot 实现。
 
 ```sh
 git clone https://github.com/Lighten012/Lighten012-Pilot.git
@@ -62,6 +91,8 @@ npm run dev
 # 另一个终端，在项目根目录
 go run ./cmd/pilot
 ```
+
+该开发方式默认连接 `/run/pilot-netd/control.sock`；只运行 Web 服务可以查看监控，修改网络需要安装并启动下面的网络助手，且运行 Web 的用户具有 socket 访问权限。
 
 构建与测试：
 
@@ -85,16 +116,33 @@ Go 通过 HTTP 提供构建后的静态网页与 API，生产运行不需要 Nod
 将项目及构建产物放到 `/opt/lighten012-pilot` 后安装服务。默认只监听本机 `127.0.0.1:8080`；需要局域网访问时，通过 systemd override 设置 `PILOT_LISTEN=<服务器局域网IP>:8080`。具体部署地址不写入仓库。
 
 ```sh
+sudo install -d /opt/lighten012-pilot/bin /opt/lighten012-pilot/web/dist
+sudo install -m 755 bin/pilot bin/pilot-netd /opt/lighten012-pilot/bin/
+sudo cp -a web/dist/. /opt/lighten012-pilot/web/dist/
 sudo groupadd --system pilot-net # 已存在时跳过
 sudo install -m 644 deploy/pilot-netd.service /etc/systemd/system/
 sudo install -m 644 deploy/lighten012-pilot.service /etc/systemd/system/
 sudo systemctl daemon-reload
+```
+
+运行 `sudo systemctl edit lighten012-pilot` 配置管理地址，例如：
+
+```ini
+[Service]
+Environment=PILOT_LISTEN=192.168.50.10:8080
+```
+
+将示例 IP 替换为本机真实管理地址，然后设置下文的受保护网卡，再启动两个服务：
+
+```sh
 sudo systemctl enable --now pilot-netd lighten012-pilot
 ```
 
+浏览器访问 `http://<管理地址>:8080/`。未设置 override 时仅可通过 `http://127.0.0.1:8080/` 从路由器本机访问。
+
 部署需要 `ifupdown`、`iproute2` 和可用的 DHCP 客户端。仅支持 `/etc/network/interfaces` 使用 `source /etc/network/interfaces.d/*` 的标准布局，以及简单的 DHCP/静态 IPv4 stanza；复杂钩子、桥接及其他网络管理器不在当前支持范围内。
 
-远程开发时先保护当前 SSH/Web 所用网卡：运行 `sudo systemctl edit pilot-netd`，填写以下内容（将 `enp0s3` 替换为实际接口），再重启助手。保护接口允许保留原配置，不允许修改地址或 DHCP 模式。
+远程开发时先保护当前 SSH/Web 所用网卡：运行 `sudo systemctl edit pilot-netd`，填写以下内容（将 `enp0s3` 替换为实际接口）。服务已运行时再重启助手，使设置生效。保护接口允许保留原配置，不允许修改地址或 DHCP 模式。
 
 ```ini
 [Service]
@@ -111,11 +159,24 @@ journalctl -u lighten012-pilot -n 50 --no-pager
 
 只读 API：`GET /api/health`、`GET /api/monitor`。首次两秒采样完成前，监控返回 503；采集出错同样返回 503，前端保留旧数据并显示异常。网络状态及修改接口位于 `/api/network/`，无需登录。修改请求要求同源 Origin 和 `X-Pilot-Request: 1`。
 
-## 后续功能
+## 第一次配置
 
-DHCP/DNS、防火墙与 NAT 默认关闭，需在对应页面启用。启用 DHCP/DNS 和出口 NAT 后，LAN 客户端可以通过 Pilot 获取地址、解析域名和共享 WAN 出口。配置备份恢复仍处于规划状态。
+1. **WAN / LAN**：选择两张不同网卡，设置 WAN 获取地址方式和 LAN 静态地址；预览、应用，再在 90 秒内确认。保存草稿不会改变实际网络。
+2. **DHCP 与 DNS**：绑定已确认的 LAN，配置解析记录、上游 DNS、地址池和租期，再保存并应用。
+3. **防火墙与 NAT**：启用转发防火墙；需要 LAN 共享上网时开启出口 NAT，应用并确认。
+4. **客户端验证**：把测试客户端接入 LAN，检查地址获取、DNS 和上网；需要对外提供服务时再添加端口映射。
+5. **备份与恢复**：下载一份已验证可用的配置，便于后续调整时恢复。
 
-本版不管理 IPv6、PPPoE、VLAN、网桥或多 WAN，也不支持迁移已确认的 WAN/LAN 接口角色；确认后可以继续修改原接口的地址设置。正式使用前仍需补充长期运行、完整主机重启和实际下游设备测试。
+DHCP/DNS、防火墙与 NAT 默认关闭，需在对应页面启用。启用 DHCP/DNS 和出口 NAT 后，LAN 客户端可以通过 Pilot 获取地址、解析域名和共享 WAN 出口。八项基础模块已完成；更多网络能力仍按需求逐步扩展。
+
+## 当前限制
+
+- 只管理 IPv4；尚无 PPPoE、VLAN、网桥、多 WAN、IPv6 转发或 DHCPv6。
+- 已确认的 WAN/LAN 不能迁移接口角色，可继续修改原接口的地址设置。
+- DNS 尚无缓存、通配符、CNAME、DNSSEC 验证和加密 DNS；DHCP 尚无静态租约绑定。
+- 防火墙管理转发流量，不管理路由器自身 INPUT/OUTPUT；端口映射尚无端口范围与 LAN 回环映射。
+- 备份恢复面向当前接口布局，不是完整系统镜像或跨设备自动迁移工具。
+- 已完成隔离网络和助手重启验证，长期运行、完整主机重启、断电与实际下游设备验证仍需补充。
 
 ## DHCP 与 DNS 使用
 
@@ -167,11 +228,22 @@ DHCP 目前不提供静态租约绑定和 DHCPv6。勿将手动设置的客户�
 
 读取不会修改 journal 保留设置或清空日志；跨重启历史是否存在取决于系统 journald 配置。每次查询最多扫描 1000 条，稀疏关键词可能需要继续加载更早记录；每条消息展示上限 4096 字节并标注截断。API 为 `GET /api/logs`，接受受限来源、级别、范围、关键词、分页参数，不支持任意文件路径、命令或正则表达式。网络助手记录配置操作路径和结果，不记录提交的配置正文。
 
+## 配置备份与恢复
+
+“备份与恢复”页面下载已确认配置为版本 1 的 JSON 文件，包含 WAN/LAN、DHCP/DNS、防火墙/NAT 与端口映射。下载不修改运行设置；未应用草稿、租约、日志、程序和其他系统文件不在备份范围。
+
+选择 JSON 文件后先校验并查看差异与完整目标配置，再点击“开始恢复并测试”。恢复会暂停转发防火墙与 DHCP/DNS、调整地址，再恢复依赖服务。成功后有 90 秒检查网络并确认保留；未确认、应用失败、助手重启都会尝试还原导入前的整套配置。还原失败时保留事务并每 10 秒重试，可在页面手动重试；事务结束前其他配置修改被阻止。网络变化可能断开当前页面，请使用对应管理地址重新进入。
+
+当前要求本机已经确认 WAN/LAN，备份沿用相同接口角色，受保护管理接口不能修改；不支持新机器接口自动映射或系统镜像恢复。备份最大 256 KB，不接受未知字段、任意路径或命令。恢复预览会重新检查地址池、解析记录、规则与端口冲突；实际应用前再次校验。相同配置无需恢复。
+
+恢复事务保存在 `/var/lib/pilot-netd/backup.json`，保留导入前配置直到确认或成功回滚。恢复期间对各模块的中间确认由外层持久化事务保护。恢复网络会以导入设置更新网络草稿。API 为 `GET /api/backup/state`、`GET /api/backup/export` 和 `POST /api/backup/{preview,apply,confirm,rollback}`。
+
 ## 隔离网络集成测试
 
 以下命令需要 root，在临时 Linux 网络命名空间中创建测试客户端与网卡，并在结束后清理；不会修改主机真实网卡配置。依赖 Python 3、iproute2、ifupdown、dnsmasq 二进制和 DHCP 客户端。
 
 ```sh
+sudo python3 tests/backup_integration.py ./bin/pilot-netd # 另需 iptables
 sudo python3 tests/services_integration.py ./bin/pilot-netd
 sudo python3 tests/firewall_integration.py ./bin/pilot-netd # 另需 iptables
 sudo python3 tests/systemlogs_integration.py ./bin/pilot-netd # 向 journal 写入带唯一标记的有限测试记录
@@ -180,3 +252,46 @@ sudo python3 tests/network_dhcp_integration.py ./bin/pilot-netd
 ```
 
 测试详情及未覆盖范围见 [VALIDATION.md](VALIDATION.md)。
+
+## 配置文件与接口
+
+| 位置 | 用途 |
+| --- | --- |
+| `/var/lib/pilot-netd/network.json` | WAN/LAN 已确认配置、草稿与未完成事务 |
+| `/var/lib/pilot-netd/services/services.json` | DHCP/DNS 持久化设置 |
+| `/var/lib/pilot-netd/services/dhcp.leases` | DHCP 运行租约 |
+| `/var/lib/pilot-netd/firewall/firewall.json` | 防火墙、NAT、端口映射与事务 |
+| `/var/lib/pilot-netd/backup.json` | 整套恢复的原配置与未完成事务 |
+
+| HTTP 接口 | 用途 |
+| --- | --- |
+| `GET /api/health`、`GET /api/monitor` | 版本、主机与监控数据 |
+| `/api/network/{state,preview,draft,apply,confirm,rollback}` | 网络状态及变更 |
+| `/api/network/services/{state,preview,apply}` | DHCP/DNS |
+| `/api/network/firewall/{state,preview,apply,confirm,rollback}` | 防火墙、NAT、端口映射 |
+| `GET /api/logs` | 受限日志查询 |
+| `/api/backup/{state,export,preview,apply,confirm,rollback}` | 备份及整套恢复 |
+
+状态、导出和日志使用 GET，预览及修改使用 POST。优先通过页面修改配置，以便执行依赖校验和恢复事务。
+
+## 常见问题
+
+**宿主机为什么访问不到 LAN 地址？**
+
+VirtualBox 的“内部网络”只连接使用同一内部网络名称的虚拟机。宿主机通常不在其中；可以添加第二台测试虚拟机，网卡连接到相同内部网络。管理页面继续通过 WAN/管理网地址访问。
+
+**怎样确认自定义 DNS 生效？**
+
+在能访问 LAN 的客户端执行 `nslookup lighten012.home <Pilot-LAN-IP>`，再查询一个未配置的域名验证上游转发。解析结果指向某个 IP，不代表该 IP 上真的运行着服务；不要用能否打开网页作为唯一判断。
+
+**恢复或网络修改后页面断开了怎么办？**
+
+先用修改后的管理地址重新打开页面。无法确认时等待 90 秒回滚；若恢复失败，助手会保留事务并重试。可以通过虚拟机控制台查看 `journalctl -u pilot-netd -n 100 --no-pager`。
+
+**备份下载后在哪里？**
+
+使用浏览器的默认下载位置，文件名为 `pilot-backup-<时间>.json`。恢复时重新选择该文件，先查看差异；与当前配置一致时不会重复应用。
+
+**网络助手不可用怎么办？**
+
+检查 `systemctl status pilot-netd lighten012-pilot` 和 `journalctl -u pilot-netd -n 100 --no-pager`。常见原因包括缺少系统依赖、存在另一网络管理器、网络配置布局不受支持，或监听端口被其他服务占用。

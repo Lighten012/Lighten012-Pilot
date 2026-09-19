@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/Lighten012/Lighten012-Pilot/internal/backup"
 	"github.com/Lighten012/Lighten012-Pilot/internal/firewall"
 	"github.com/Lighten012/Lighten012-Pilot/internal/network"
 	"github.com/Lighten012/Lighten012-Pilot/internal/services"
@@ -20,7 +21,11 @@ import (
 )
 
 func decode(w http.ResponseWriter, r *http.Request, v any) error {
-	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 65536))
+	limit := int64(65536)
+	if strings.HasPrefix(r.URL.Path, "/backup/") {
+		limit = 262144
+	}
+	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit))
 	d.DisallowUnknownFields()
 	if e := d.Decode(v); e != nil {
 		return e
@@ -60,11 +65,18 @@ func main() {
 	if e != nil {
 		log.Fatal(e)
 	}
+	bm, e := backup.New(&backup.System{Network: m, Services: sm, Firewall: fm}, &operations, *state, *timeout)
+	if e != nil {
+		log.Fatal(e)
+	}
 	go func() {
 		for range time.Tick(time.Second) {
+			operations.Lock()
+			bm.Tick()
 			m.Tick()
 			sm.Reconcile()
 			fm.Tick()
+			operations.Unlock()
 		}
 	}()
 	mux := http.NewServeMux()
@@ -96,8 +108,6 @@ func main() {
 		reply(w, map[string]bool{"ok": true}, m.Save(c))
 	})
 	mux.HandleFunc("POST /apply", func(w http.ResponseWriter, r *http.Request) {
-		operations.Lock()
-		defer operations.Unlock()
 		if fm.Enabled() {
 			reply(w, nil, fmt.Errorf("修改 WAN/LAN 前，请先停用防火墙与 NAT 并确认"))
 			return
@@ -125,8 +135,6 @@ func main() {
 		reply(w, p, e)
 	})
 	mux.HandleFunc("POST /services/apply", func(w http.ResponseWriter, r *http.Request) {
-		operations.Lock()
-		defer operations.Unlock()
 		var req services.ApplyRequest
 		if e := decode(w, r, &req); e != nil {
 			reply(w, nil, e)
@@ -163,8 +171,6 @@ func main() {
 		reply(w, p, e)
 	})
 	mux.HandleFunc("POST /firewall/apply", func(w http.ResponseWriter, r *http.Request) {
-		operations.Lock()
-		defer operations.Unlock()
 		var p firewall.Plan
 		if e := decode(w, r, &p); e != nil {
 			reply(w, nil, e)
@@ -191,6 +197,55 @@ func main() {
 			reply(w, map[string]bool{"ok": true}, e)
 		})
 	}
+	mux.HandleFunc("GET /backup/state", func(w http.ResponseWriter, r *http.Request) { reply(w, bm.State(), nil) })
+	mux.HandleFunc("GET /backup/export", func(w http.ResponseWriter, r *http.Request) { b, e := bm.Export(); reply(w, b, e) })
+	mux.HandleFunc("POST /backup/preview", func(w http.ResponseWriter, r *http.Request) {
+		var b backup.Bundle
+		if e := decode(w, r, &b); e != nil {
+			reply(w, nil, e)
+			return
+		}
+		p, e := bm.Preview(b)
+		reply(w, p, e)
+	})
+	mux.HandleFunc("POST /backup/apply", func(w http.ResponseWriter, r *http.Request) {
+		var p backup.Plan
+		if e := decode(w, r, &p); e != nil {
+			reply(w, nil, e)
+			return
+		}
+		id, e := bm.Apply(p)
+		reply(w, map[string]string{"id": id}, e)
+	})
+	for _, action := range []string{"confirm", "rollback"} {
+		mux.HandleFunc("POST /backup/"+action, func(w http.ResponseWriter, r *http.Request) {
+			var req struct {
+				ID string `json:"id"`
+			}
+			if e := decode(w, r, &req); e != nil {
+				reply(w, nil, e)
+				return
+			}
+			var e error
+			if action == "confirm" {
+				e = bm.Confirm(req.ID)
+			} else {
+				e = bm.Rollback(req.ID)
+			}
+			reply(w, map[string]bool{"ok": true}, e)
+		})
+	}
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" || r.URL.Path == "/backup/export" {
+			operations.Lock()
+			defer operations.Unlock()
+			if r.Method == "POST" && !strings.HasPrefix(r.URL.Path, "/backup/") && bm.Busy() {
+				reply(w, nil, fmt.Errorf("配置恢复进行中，请在备份页面确认或回滚"))
+				return
+			}
+		}
+		mux.ServeHTTP(w, r)
+	})
 	if e = os.MkdirAll(filepathDir(*socket), 0750); e != nil {
 		log.Fatal(e)
 	}
@@ -205,7 +260,7 @@ func main() {
 		log.Fatal(e)
 	}
 	log.Printf("Network helper listening on Unix socket %s", *socket)
-	log.Fatal((&http.Server{Handler: audit(mux), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 120 * time.Second}).Serve(listener))
+	log.Fatal((&http.Server{Handler: audit(handler), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 120 * time.Second}).Serve(listener))
 }
 
 type statusWriter struct {

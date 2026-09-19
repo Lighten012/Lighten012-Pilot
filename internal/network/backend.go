@@ -337,7 +337,7 @@ func (l *Linux) Activate(changes []Change, rollback bool) error {
 				if e = os.WriteFile(tmp, []byte(Render(*to)), 0600); e != nil {
 					return e
 				}
-				if _, e = run("/usr/sbin/ifup", "--force", "-i", tmp, ch.Interface); e != nil {
+				if _, e = run("/usr/sbin/ifup", "--force", "-i", tmp, "--state-dir", l.stateDir(), ch.Interface); e != nil {
 					return e
 				}
 			} else {

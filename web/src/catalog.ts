@@ -51,7 +51,8 @@ export const features = [
     name: "端口转发",
     group: "访问控制",
     desc: "将指定入口端口映射到内网服务。",
-    scope: "TCP/UDP 单端口映射、来源限制、LAN 目标校验、端口冲突检测与开关；共用防火墙预览、确认与回滚。",
+    scope:
+      "TCP/UDP 单端口映射、来源限制、LAN 目标校验、端口冲突检测与开关；共用防火墙预览、确认与回滚。",
     level: "进阶",
     recommended: false,
   },
@@ -60,7 +61,8 @@ export const features = [
     name: "系统日志",
     group: "可观测性",
     desc: "集中查看服务事件与网络故障线索。",
-    scope: "读取 systemd journal，按服务、级别、时间和关键词筛选，支持游标分页、自动刷新及已加载日志导出。",
+    scope:
+      "读取 systemd journal，按服务、级别、时间和关键词筛选，支持游标分页、自动刷新及已加载日志导出。",
     level: "基础",
     recommended: false,
   },
@@ -69,7 +71,8 @@ export const features = [
     name: "配置备份与恢复",
     group: "系统管理",
     desc: "保存可恢复的配置，放心尝试新设置。",
-    scope: "版本化配置、导入校验和恢复；网络变更回滚将作为基础机制独立实现。",
+    scope:
+      "下载版本化 JSON 备份，预览差异并恢复 WAN/LAN、DHCP/DNS、防火墙与映射；支持 90 秒确认、失败及重启回滚，保留现有接口角色。",
     level: "基础",
     recommended: false,
   },

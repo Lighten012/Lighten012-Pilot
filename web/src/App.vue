@@ -27,6 +27,7 @@ import { features } from "./catalog";
 import NetworkPage from "./components/NetworkPage.vue";
 import ServicesPage from "./components/ServicesPage.vue";
 import FirewallPage from "./components/FirewallPage.vue";
+import BackupPage from "./components/BackupPage.vue";
 import LogsPage from "./components/LogsPage.vue";
 const page = ref("overview"),
   health = ref<Health | null>(null),
@@ -47,9 +48,10 @@ const navigation = [
   { id: "firewall", label: "防火墙与 NAT", icon: Shield },
   { id: "forward", label: "端口转发", icon: ArrowRight },
   { id: "logs", label: "系统日志", icon: Terminal },
+  { id: "backup", label: "备份与恢复", icon: Settings2 },
   { id: "features", label: "功能规划", icon: Layers },
 ];
-const pending = [{ label: "系统管理", icon: Settings2, id: "backup" }];
+
 const implemented = [
   "monitor",
   "network",
@@ -58,6 +60,7 @@ const implemented = [
   "firewall",
   "forward",
   "logs",
+  "backup",
 ];
 function featurePage(id: string) {
   return ["dhcp", "dns"].includes(id) ? "services" : id;
@@ -77,7 +80,9 @@ const title = computed(() =>
               ? "把服务，连接到需要它的人。"
               : page.value === "logs"
                 ? "从记录中，找到答案。"
-                : "从基础，逐步构建。",
+                : page.value === "backup"
+                  ? "保存现在，放心尝试。"
+                  : "从基础，逐步构建。",
 );
 const current = computed(() => sample.value?.history.at(-1));
 const points = computed(() => sample.value?.history.slice(-range.value) || []);
@@ -171,16 +176,7 @@ onUnmounted(() => {
           }}<span v-if="n.id === 'features'" class="count">8</span>
         </button>
       </nav>
-      <p class="nav-caption second">路由服务 <span>即将构建</span></p>
-      <button
-        v-for="n in pending"
-        :key="n.id"
-        class="nav-item pending"
-        @click="openFeature(n.id)"
-      >
-        <component :is="n.icon" :size="18" />{{ n.label
-        }}<span class="pending-dot"></span>
-      </button>
+
       <div class="sidebar-bottom">
         <div class="build-card">
           <span class="tiny-dot"></span>从一个想法开始<b
@@ -190,7 +186,7 @@ onUnmounted(() => {
           </button>
         </div>
         <div class="version">
-          <span>LIGHTEN012-PILOT</span><span>v0.5.0 · 开发版</span>
+          <span>LIGHTEN012-PILOT</span><span>v0.6.0 · 开发版</span>
         </div>
       </div>
     </aside>
@@ -208,7 +204,7 @@ onUnmounted(() => {
           ><button
             class="icon-button"
             aria-label="关于此版本"
-            @click="notify('v0.5.0 · 已加入端口转发与系统日志。')"
+            @click="notify('v0.6.0 · 已加入端口转发与系统日志。')"
           >
             <CircleHelp :size="19" /></button
           ><span class="avatar">P</span>
@@ -254,6 +250,7 @@ onUnmounted(() => {
           :forwarding="page === 'forward'"
         />
         <LogsPage v-else-if="page === 'logs'" />
+        <BackupPage v-else-if="page === 'backup'" />
         <template v-else-if="page !== 'features'">
           <section class="hero-grid">
             <div class="network-hero">
@@ -565,15 +562,15 @@ onUnmounted(() => {
               </div>
             </div>
             <div class="panel next-panel">
-              <span class="section-kicker">正在构建</span>
+              <span class="section-kicker">基础功能已就绪</span>
               <div class="next-icon"><Activity :size="22" /></div>
-              <h3>先看清，再掌控。</h3>
-              <p>第一步：系统监控。<br />以真实数据，建立路由系统的基础。</p>
+              <h3>网络，自己掌控。</h3>
+              <p>从状态观察到配置管理。<br />调整前先留一份配置备份。</p>
               <div class="implemented">
-                <Check :size="15" /> CPU、内存、网卡与运行状态
+                <Check :size="15" /> 八项基础模块已完成
               </div>
               <button class="button secondary" @click="page = 'features'">
-                探索后续功能 <ArrowRight :size="15" />
+                查看功能范围 <ArrowRight :size="15" />
               </button>
             </div>
           </section>
@@ -584,11 +581,11 @@ onUnmounted(() => {
         <template v-else
           ><div class="roadmap-banner">
             <div>
-              <span class="tiny-dot"></span>当前阶段 · 05
+              <span class="tiny-dot"></span>当前阶段 · 06
               <h2>从观察，走向管理。</h2>
-              <p>已实现网络管理、DHCP/DNS、防火墙、端口转发与系统日志。</p>
+              <p>八项基础模块已完成，配置支持备份、预览恢复与自动回滚。</p>
             </div>
-            <span class="roadmap-count">07 <small>/ 08</small></span>
+            <span class="roadmap-count">08 <small>/ 08</small></span>
           </div>
           <div class="feature-grid">
             <button
@@ -622,7 +619,7 @@ onUnmounted(() => {
           <span
             ><span class="tiny-dot"></span> LIGHTEN012-PILOT ·
             为自己的网络而构建</span
-          ><span>Go + Vue · 网络服务 v0.5</span>
+          ><span>Go + Vue · 网络服务 v0.6</span>
         </footer>
       </main>
     </div>
