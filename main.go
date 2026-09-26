@@ -35,6 +35,15 @@ func (a *app) routes() http.Handler {
 			Stats  Stats  `json:"stats"`
 		}{a.resolver.getConfig(), a.resolver.stats()})
 	})
+	mux.HandleFunc("GET /api/interfaces", func(w http.ResponseWriter, r *http.Request) {
+		interfaces, err := listInterfaces()
+		if err != nil {
+			log.Printf("list interfaces: %v", err)
+			http.Error(w, "无法读取网卡", http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, interfaces)
+	})
 	mux.HandleFunc("PUT /api/config", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Pilot-Request") != "1" || !sameOrigin(r) {
 			http.Error(w, "请求来源无效", http.StatusForbidden)
