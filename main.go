@@ -183,6 +183,11 @@ func main() {
 	}
 	dnsService := newDNSService(r, *dnsPort)
 	network.dns = dnsService
+	forwarding, err := newForwarder()
+	if err != nil {
+		log.Fatalf("read IPv4 forwarding: %v", err)
+	}
+	network.forward = forwarding
 	if network.roles != nil {
 		lan, err := currentIPv4(network.roles.LAN)
 		if err != nil {
@@ -191,6 +196,11 @@ func main() {
 		change, err := dnsService.stage(lan)
 		if err != nil {
 			log.Fatal(err)
+		}
+		if err := forwarding.apply(*network.roles, lan); err != nil {
+			change.abort()
+			_ = forwarding.close()
+			log.Fatalf("enable LAN forwarding: %v", err)
 		}
 		change.commit()
 	}
@@ -210,4 +220,7 @@ func main() {
 	}
 	_ = web.Close()
 	dnsService.close()
+	if err := forwarding.close(); err != nil {
+		log.Printf("stop LAN forwarding: %v", err)
+	}
 }

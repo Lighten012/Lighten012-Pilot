@@ -36,6 +36,7 @@ type networkManager struct {
 	webAddress    string
 	runIP         func(...string) error
 	dns           *dnsService
+	forward       *forwarder
 }
 
 var interfaceNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_.:-]+$`)
@@ -113,18 +114,35 @@ func (m *networkManager) selectRoles(roles networkRoles) error {
 			return err
 		}
 	}
+	if m.forward != nil {
+		if err := m.forward.apply(roles, lan); err != nil {
+			cleanupErr := m.forward.close()
+			if dnsChange != nil {
+				dnsChange.abort()
+			}
+			return errors.Join(err, cleanupErr)
+		}
+	}
 	data, err := json.MarshalIndent(roles, "", "  ")
 	if err != nil {
+		var cleanupErr error
+		if m.forward != nil {
+			cleanupErr = m.forward.close()
+		}
 		if dnsChange != nil {
 			dnsChange.abort()
 		}
-		return err
+		return errors.Join(err, cleanupErr)
 	}
 	if err := writeAtomic(m.path, append(data, '\n'), 0600); err != nil {
+		var cleanupErr error
+		if m.forward != nil {
+			cleanupErr = m.forward.close()
+		}
 		if dnsChange != nil {
 			dnsChange.abort()
 		}
-		return err
+		return errors.Join(err, cleanupErr)
 	}
 	m.roles = &roles
 	if dnsChange != nil {
@@ -183,20 +201,38 @@ func (m *networkManager) changeLANAddress(value string) error {
 			return errors.Join(err, removeErr)
 		}
 	}
+	if m.forward != nil {
+		if err := m.forward.apply(*m.roles, newAddress); err != nil {
+			restoreErr := m.forward.apply(*m.roles, oldAddress)
+			if dnsChange != nil {
+				dnsChange.abort()
+			}
+			removeErr := m.runIP("-4", "address", "del", newAddress.String(), "dev", m.roles.LAN)
+			return errors.Join(err, restoreErr, removeErr)
+		}
+	}
 	if err := writeAtomic(path, []byte(newFile), 0644); err != nil {
+		var restoreForwardErr error
+		if m.forward != nil {
+			restoreForwardErr = m.forward.apply(*m.roles, oldAddress)
+		}
 		if dnsChange != nil {
 			dnsChange.abort()
 		}
 		removeErr := m.runIP("-4", "address", "del", newAddress.String(), "dev", m.roles.LAN)
-		return errors.Join(fmt.Errorf("保存 LAN 地址失败：%w", err), removeErr)
+		return errors.Join(fmt.Errorf("保存 LAN 地址失败：%w", err), restoreForwardErr, removeErr)
 	}
 	if err := m.runIP("-4", "address", "del", oldAddress.String(), "dev", m.roles.LAN); err != nil {
+		var restoreForwardErr error
+		if m.forward != nil {
+			restoreForwardErr = m.forward.apply(*m.roles, oldAddress)
+		}
 		if dnsChange != nil {
 			dnsChange.abort()
 		}
 		restoreErr := writeAtomic(path, oldFile, 0644)
 		removeErr := m.runIP("-4", "address", "del", newAddress.String(), "dev", m.roles.LAN)
-		return errors.Join(fmt.Errorf("移除原地址失败：%w", err), restoreErr, removeErr)
+		return errors.Join(fmt.Errorf("移除原地址失败：%w", err), restoreForwardErr, restoreErr, removeErr)
 	}
 	if dnsChange != nil {
 		dnsChange.commit()

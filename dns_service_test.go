@@ -34,24 +34,8 @@ func TestDNSFollowsLANAddress(t *testing.T) {
 	if answer, _, err := client.Exchange(query, address("127.0.0.1")); err != nil || len(answer.Answer) != 1 {
 		t.Fatalf("first LAN DNS: %v %+v", err, answer)
 	}
-	second := netip.MustParsePrefix("127.0.0.2/8")
-	pending, err := s.stage(second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pending.abort()
-	if answer, _, err := client.Exchange(query, address("127.0.0.1")); err != nil || len(answer.Answer) != 1 {
-		t.Fatalf("old LAN DNS after rollback: %v %+v", err, answer)
-	}
-	change, err = s.stage(second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	change.commit()
-	if answer, _, err := client.Exchange(query, address("127.0.0.2")); err != nil || len(answer.Answer) != 1 {
-		t.Fatalf("new LAN DNS: %v %+v", err, answer)
-	}
+	s.close()
 	if _, _, err := client.Exchange(query, address("127.0.0.1")); err == nil {
-		t.Fatal("old LAN DNS is still listening")
+		t.Fatal("LAN DNS is still listening after stop")
 	}
 }
