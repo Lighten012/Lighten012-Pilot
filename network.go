@@ -35,6 +35,7 @@ type networkManager struct {
 	interfacesDir string
 	webAddress    string
 	runIP         func(...string) error
+	dns           *dnsService
 }
 
 var interfaceNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_.:-]+$`)
@@ -105,14 +106,30 @@ func (m *networkManager) selectRoles(roles networkRoles) error {
 	if _, _, err := m.readLANFile(roles.LAN, lan); err != nil {
 		return err
 	}
+	var dnsChange *dnsChange
+	if m.dns != nil {
+		dnsChange, err = m.dns.stage(lan)
+		if err != nil {
+			return err
+		}
+	}
 	data, err := json.MarshalIndent(roles, "", "  ")
 	if err != nil {
+		if dnsChange != nil {
+			dnsChange.abort()
+		}
 		return err
 	}
 	if err := writeAtomic(m.path, append(data, '\n'), 0600); err != nil {
+		if dnsChange != nil {
+			dnsChange.abort()
+		}
 		return err
 	}
 	m.roles = &roles
+	if dnsChange != nil {
+		dnsChange.commit()
+	}
 	return nil
 }
 
@@ -158,14 +175,31 @@ func (m *networkManager) changeLANAddress(value string) error {
 	if err := m.runIP("-4", "address", "add", newAddress.String(), "dev", m.roles.LAN); err != nil {
 		return fmt.Errorf("添加新地址失败：%w", err)
 	}
+	var dnsChange *dnsChange
+	if m.dns != nil {
+		dnsChange, err = m.dns.stage(newAddress)
+		if err != nil {
+			removeErr := m.runIP("-4", "address", "del", newAddress.String(), "dev", m.roles.LAN)
+			return errors.Join(err, removeErr)
+		}
+	}
 	if err := writeAtomic(path, []byte(newFile), 0644); err != nil {
+		if dnsChange != nil {
+			dnsChange.abort()
+		}
 		removeErr := m.runIP("-4", "address", "del", newAddress.String(), "dev", m.roles.LAN)
 		return errors.Join(fmt.Errorf("保存 LAN 地址失败：%w", err), removeErr)
 	}
 	if err := m.runIP("-4", "address", "del", oldAddress.String(), "dev", m.roles.LAN); err != nil {
+		if dnsChange != nil {
+			dnsChange.abort()
+		}
 		restoreErr := writeAtomic(path, oldFile, 0644)
 		removeErr := m.runIP("-4", "address", "del", newAddress.String(), "dev", m.roles.LAN)
 		return errors.Join(fmt.Errorf("移除原地址失败：%w", err), restoreErr, removeErr)
+	}
+	if dnsChange != nil {
+		dnsChange.commit()
 	}
 	return nil
 }

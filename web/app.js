@@ -66,6 +66,7 @@ function renderNetwork(state) {
   $("roles-form").hidden = selected;
   $("roles-current").hidden = !selected;
   if (!selected) {
+    $("dns-test-hint").textContent = "请先选择 LAN 网卡";
     const available = state.interfaces.filter((item) => !item.loopback);
     for (const id of ["wan-select", "lan-select"]) {
       const select = $(id);
@@ -85,6 +86,7 @@ function renderNetwork(state) {
   $("wan-address").textContent = wan?.addresses.find((address) => address.includes(".")) || "暂无 IPv4";
   $("lan-address").textContent = state.lanAddress || "暂无 IPv4";
   const [address, prefix] = (state.lanAddress || "").split("/");
+  $("dns-test-hint").textContent = address ? `nslookup lighten012.home ${address}` : "LAN 暂无 IPv4 地址";
   $("lan-ip").value = address || "";
   $("lan-prefix").textContent = prefix ? `/${prefix}` : "";
   $("save-lan-ip").disabled = !address;

@@ -9,14 +9,11 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
-	"net/netip"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
 	"time"
-
-	"github.com/miekg/dns"
 )
 
 //go:embed web/*
@@ -167,33 +164,40 @@ func decodeRequest(w http.ResponseWriter, r *http.Request, v any) error {
 
 func main() {
 	webAddr := flag.String("web", "127.0.0.1:8080", "web listen address")
-	dnsAddr := flag.String("dns", "127.0.0.1:53", "DNS listen address")
-	lan := flag.String("lan", "127.0.0.0/8", "allowed DNS client subnet")
+	dnsPort := flag.Int("dns-port", 53, "LAN DNS port")
 	configPath := flag.String("config", "config.json", "persistent configuration path")
 	networkConfig := flag.String("network-config", "network.json", "saved WAN/LAN interface roles")
 	interfacesDir := flag.String("interfaces-dir", "/etc/network/interfaces.d", "ifupdown interface files")
 	flag.Parse()
-	allowed, err := netip.ParsePrefix(*lan)
-	if err != nil {
-		log.Fatal(err)
+	if *dnsPort < 1 || *dnsPort > 65535 {
+		log.Fatal("invalid DNS port")
 	}
 	c, err := loadConfig(*configPath)
 	if err != nil {
 		log.Fatalf("load config: %v", err)
 	}
-	r := newResolver(c, allowed)
+	r := newResolver(c)
 	network, err := newNetworkManager(*networkConfig, *interfacesDir, *webAddr)
 	if err != nil {
 		log.Fatalf("load network roles: %v", err)
 	}
-	udp := &dns.Server{Addr: *dnsAddr, Net: "udp", Handler: r}
-	tcp := &dns.Server{Addr: *dnsAddr, Net: "tcp", Handler: r}
+	dnsService := newDNSService(r, *dnsPort)
+	network.dns = dnsService
+	if network.roles != nil {
+		lan, err := currentIPv4(network.roles.LAN)
+		if err != nil {
+			log.Fatalf("LAN DNS address: %v", err)
+		}
+		change, err := dnsService.stage(lan)
+		if err != nil {
+			log.Fatal(err)
+		}
+		change.commit()
+	}
 	web := &http.Server{Addr: *webAddr, Handler: (&app{resolver: r, network: network, path: *configPath}).routes(), ReadHeaderTimeout: 5 * time.Second}
-	errCh := make(chan error, 3)
-	go func() { errCh <- udp.ListenAndServe() }()
-	go func() { errCh <- tcp.ListenAndServe() }()
+	errCh := make(chan error, 1)
 	go func() { errCh <- web.ListenAndServe() }()
-	log.Printf("Pilot v2 DNS %s (clients %s), web http://%s", *dnsAddr, *lan, *webAddr)
+	log.Printf("Pilot v2 web http://%s; DNS follows selected LAN", *webAddr)
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGTERM, syscall.SIGINT)
 	select {
@@ -205,6 +209,5 @@ func main() {
 		}
 	}
 	_ = web.Close()
-	_ = udp.Shutdown()
-	_ = tcp.Shutdown()
+	dnsService.close()
 }

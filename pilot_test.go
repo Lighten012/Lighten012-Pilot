@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"net/netip"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -29,7 +28,7 @@ func TestLocalRecordsAndPersistence(t *testing.T) {
 	if loaded.Records[0].Name != "lighten012.home" || loaded.Records[0].TTL != 60 {
 		t.Fatalf("unexpected loaded config: %+v", loaded)
 	}
-	r := newResolver(loaded, netip.MustParsePrefix("127.0.0.0/8"))
+	r := newResolver(loaded)
 	query := new(dns.Msg)
 	query.SetQuestion("LIGHTEN012.HOME.", dns.TypeA)
 	answer := r.resolve(context.Background(), query, "udp")
@@ -48,7 +47,7 @@ func TestLocalRecordsAndPersistence(t *testing.T) {
 
 func TestConfigAPIUpdatesLiveResolver(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	r := newResolver(defaultConfig(), netip.MustParsePrefix("127.0.0.0/8"))
+	r := newResolver(defaultConfig())
 	api := (&app{resolver: r, path: path}).routes()
 	request := httptest.NewRequest(http.MethodPut, "http://pilot.local/api/config", strings.NewReader(`{"upstream":"119.29.29.29","records":[{"name":"pilot.home","type":"A","value":"192.168.60.1","ttl":120}]}`))
 	request.Header.Set("X-Pilot-Request", "1")
@@ -79,7 +78,7 @@ func TestConfigAPIUpdatesLiveResolver(t *testing.T) {
 
 func TestInvalidConfigDoesNotReplaceSavedConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	r := newResolver(defaultConfig(), netip.MustParsePrefix("127.0.0.0/8"))
+	r := newResolver(defaultConfig())
 	api := (&app{resolver: r, path: path}).routes()
 	request := httptest.NewRequest(http.MethodPut, "http://pilot.local/api/config", strings.NewReader(`{"upstream":"119.29.29.29","records":[{"name":"bad.home","type":"A","value":"not-an-ip"}]}`))
 	request.Header.Set("X-Pilot-Request", "1")

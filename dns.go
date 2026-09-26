@@ -23,13 +23,12 @@ type Resolver struct {
 	mu                                sync.RWMutex
 	config                            Config
 	records                           map[string][]dns.RR
-	allowed                           netip.Prefix
 	slots                             chan struct{}
 	queries, local, forwarded, failed atomic.Uint64
 }
 
-func newResolver(c Config, allowed netip.Prefix) *Resolver {
-	r := &Resolver{allowed: allowed, slots: make(chan struct{}, 128)}
+func newResolver(c Config) *Resolver {
+	r := &Resolver{slots: make(chan struct{}, 128)}
 	r.setConfig(c)
 	return r
 }
@@ -117,10 +116,10 @@ func (r *Resolver) resolve(ctx context.Context, q *dns.Msg, transport string) *d
 	return answer
 }
 
-func (r *Resolver) ServeDNS(w dns.ResponseWriter, q *dns.Msg) {
+func (r *Resolver) serveDNS(w dns.ResponseWriter, q *dns.Msg, allowed netip.Prefix) {
 	host, _, err := net.SplitHostPort(w.RemoteAddr().String())
 	ip, parseErr := netip.ParseAddr(host)
-	if err != nil || parseErr != nil || !r.allowed.Contains(ip.Unmap()) {
+	if err != nil || parseErr != nil || !allowed.Contains(ip.Unmap()) {
 		_ = w.WriteMsg(reply(q, dns.RcodeRefused))
 		return
 	}
