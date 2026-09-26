@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"net/netip"
@@ -23,6 +24,7 @@ var assets embed.FS
 
 type app struct {
 	resolver *Resolver
+	network  *networkManager
 	path     string
 	saveMu   sync.Mutex
 }
@@ -44,6 +46,54 @@ func (a *app) routes() http.Handler {
 		}
 		writeJSON(w, http.StatusOK, interfaces)
 	})
+	if a.network != nil {
+		mux.HandleFunc("GET /api/network", func(w http.ResponseWriter, r *http.Request) {
+			state, err := a.network.state()
+			if err != nil {
+				log.Printf("network state: %v", err)
+				http.Error(w, "无法读取网卡", http.StatusInternalServerError)
+				return
+			}
+			writeJSON(w, http.StatusOK, state)
+		})
+		mux.HandleFunc("PUT /api/network/roles", func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("X-Pilot-Request") != "1" || !sameOrigin(r) {
+				http.Error(w, "请求来源无效", http.StatusForbidden)
+				return
+			}
+			var roles networkRoles
+			if err := decodeRequest(w, r, &roles); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if err := a.network.selectRoles(roles); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			state, _ := a.network.state()
+			writeJSON(w, http.StatusOK, state)
+		})
+		mux.HandleFunc("PUT /api/network/lan-ip", func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("X-Pilot-Request") != "1" || !sameOrigin(r) {
+				http.Error(w, "请求来源无效", http.StatusForbidden)
+				return
+			}
+			var input struct {
+				Address string `json:"address"`
+			}
+			if err := decodeRequest(w, r, &input); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if err := a.network.changeLANAddress(input.Address); err != nil {
+				log.Printf("change LAN address: %v", err)
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			state, _ := a.network.state()
+			writeJSON(w, http.StatusOK, state)
+		})
+	}
 	mux.HandleFunc("PUT /api/config", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Pilot-Request") != "1" || !sameOrigin(r) {
 			http.Error(w, "请求来源无效", http.StatusForbidden)
@@ -84,7 +134,8 @@ func (a *app) routes() http.Handler {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write(b)
 	})
-	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(assets))))
+	webFiles, _ := fs.Sub(assets, "web")
+	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(webFiles))))
 	return mux
 }
 
@@ -102,11 +153,25 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+func decodeRequest(w http.ResponseWriter, r *http.Request, v any) error {
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(v); err != nil {
+		return err
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return errors.New("只能提交一个 JSON 对象")
+	}
+	return nil
+}
+
 func main() {
 	webAddr := flag.String("web", "127.0.0.1:8080", "web listen address")
 	dnsAddr := flag.String("dns", "127.0.0.1:53", "DNS listen address")
 	lan := flag.String("lan", "127.0.0.0/8", "allowed DNS client subnet")
 	configPath := flag.String("config", "config.json", "persistent configuration path")
+	networkConfig := flag.String("network-config", "network.json", "saved WAN/LAN interface roles")
+	interfacesDir := flag.String("interfaces-dir", "/etc/network/interfaces.d", "ifupdown interface files")
 	flag.Parse()
 	allowed, err := netip.ParsePrefix(*lan)
 	if err != nil {
@@ -117,9 +182,13 @@ func main() {
 		log.Fatalf("load config: %v", err)
 	}
 	r := newResolver(c, allowed)
+	network, err := newNetworkManager(*networkConfig, *interfacesDir, *webAddr)
+	if err != nil {
+		log.Fatalf("load network roles: %v", err)
+	}
 	udp := &dns.Server{Addr: *dnsAddr, Net: "udp", Handler: r}
 	tcp := &dns.Server{Addr: *dnsAddr, Net: "tcp", Handler: r}
-	web := &http.Server{Addr: *webAddr, Handler: (&app{resolver: r, path: *configPath}).routes(), ReadHeaderTimeout: 5 * time.Second}
+	web := &http.Server{Addr: *webAddr, Handler: (&app{resolver: r, network: network, path: *configPath}).routes(), ReadHeaderTimeout: 5 * time.Second}
 	errCh := make(chan error, 3)
 	go func() { errCh <- udp.ListenAndServe() }()
 	go func() { errCh <- tcp.ListenAndServe() }()
