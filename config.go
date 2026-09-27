@@ -22,16 +22,26 @@ type Record struct {
 }
 
 type Config struct {
-	Upstream string   `json:"upstream"`
-	Records  []Record `json:"records"`
+	Upstream       string   `json:"upstream"`
+	BackupUpstream string   `json:"backupUpstream"`
+	Records        []Record `json:"records"`
 }
 
 func defaultConfig() Config { return Config{Upstream: "119.29.29.29", Records: []Record{}} }
 
 func normalize(c Config) (Config, error) {
 	c.Upstream = strings.TrimSpace(c.Upstream)
-	if ip := net.ParseIP(c.Upstream); ip == nil || ip.To4() == nil {
-		return c, errors.New("上游 DNS 必须是 IPv4 地址")
+	c.BackupUpstream = strings.TrimSpace(c.BackupUpstream)
+	if c.Upstream == "" && c.BackupUpstream == "" {
+		return c, errors.New("至少填写一个上游 DNS")
+	}
+	for _, address := range []string{c.Upstream, c.BackupUpstream} {
+		if address == "" {
+			continue
+		}
+		if ip := net.ParseIP(address); ip == nil || ip.To4() == nil {
+			return c, errors.New("上游 DNS 必须是 IPv4 地址")
+		}
 	}
 	if len(c.Records) > 500 {
 		return c, errors.New("最多保存 500 条记录")

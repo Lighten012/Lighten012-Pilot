@@ -2,15 +2,17 @@
 Description=Lighten012 Pilot LAN router
 After=network-online.target
 Wants=network-online.target
+After=lighten012-mihomo.service
+Wants=lighten012-mihomo.service
 
 [Service]
 Type=simple
-ExecStart=/opt/lighten012-pilot-v2/pilot -web 192.168.50.178:8080 -config /var/lib/lighten012-pilot-v2/config.json -network-config /var/lib/lighten012-pilot-v2/network.json -dhcp-leases /var/lib/lighten012-pilot-v2/dhcp-leases.json
+ExecStart=/opt/lighten012-pilot-v2/pilot -web 0.0.0.0:80 -config /var/lib/lighten012-pilot-v2/config.json -network-config /var/lib/lighten012-pilot-v2/network.json -dhcp-leases /var/lib/lighten012-pilot-v2/dhcp-leases.json
 Restart=on-failure
 RestartSec=3
 User=root
 StateDirectory=lighten012-pilot-v2
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_ADMIN CAP_NET_RAW
 NoNewPrivileges=yes
 ProtectSystem=strict
 ReadWritePaths=/etc/network/interfaces.d

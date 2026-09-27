@@ -296,8 +296,11 @@ func (m *networkManager) checkProtectedLAN(name string) error {
 		return err
 	}
 	webIP := net.ParseIP(host)
-	if webIP == nil || webIP.IsUnspecified() {
-		return errors.New("管理页面必须绑定具体 IP，才能安全修改 LAN")
+	if webIP == nil {
+		return errors.New("管理页面监听地址无效")
+	}
+	if webIP.IsUnspecified() {
+		return nil // Wildcard binding remains available on the separate WAN interface.
 	}
 	iface, err := net.InterfaceByName(name)
 	if err != nil {

@@ -1,0 +1,19 @@
+[Unit]
+Description=Lighten012 Pilot Mihomo core
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/mihomo -d /var/lib/lighten012-pilot-v2 -f /var/lib/lighten012-pilot-v2/mihomo.yaml
+Restart=on-failure
+RestartSec=3
+User=root
+StateDirectory=lighten012-pilot-v2
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

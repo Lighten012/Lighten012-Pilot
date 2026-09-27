@@ -23,6 +23,7 @@ type forwarder struct {
 	setIPForward   func(bool) error
 	initialForward bool
 	active         bool
+	proxy          *proxyWhitelist
 }
 
 func newForwarder() (*forwarder, error) {
@@ -76,6 +77,11 @@ func (f *forwarder) apply(roles networkRoles, lan netip.Prefix) error {
 	if err := f.setIPForward(true); err != nil {
 		return fmt.Errorf("启用 IPv4 转发: %w", err)
 	}
+	if f.proxy != nil {
+		if err := f.proxy.apply(roles, lan); err != nil {
+			return fmt.Errorf("启用代理白名单: %w", err)
+		}
+	}
 	f.active = true
 	return nil
 }
@@ -87,6 +93,9 @@ func (f *forwarder) close() error {
 		return nil
 	}
 	var errs []error
+	if f.proxy != nil {
+		errs = append(errs, f.proxy.close())
+	}
 	if !f.initialForward {
 		errs = append(errs, f.setIPForward(false))
 	}

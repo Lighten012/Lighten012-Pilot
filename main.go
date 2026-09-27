@@ -22,12 +22,16 @@ var assets embed.FS
 type app struct {
 	resolver *Resolver
 	network  *networkManager
+	mihomo   *mihomoClient
 	path     string
 	saveMu   sync.Mutex
 }
 
 func (a *app) routes() http.Handler {
 	mux := http.NewServeMux()
+	if a.mihomo != nil {
+		a.mihomo.routes(mux)
+	}
 	mux.HandleFunc("GET /api/state", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, struct {
 			Config Config `json:"config"`
@@ -172,13 +176,14 @@ func decodeRequest(w http.ResponseWriter, r *http.Request, v any) error {
 }
 
 func main() {
-	webAddr := flag.String("web", "127.0.0.1:8080", "web listen address")
+	webAddr := flag.String("web", "0.0.0.0:80", "web listen address")
 	dnsPort := flag.Int("dns-port", 53, "LAN DNS port")
 	dhcpPort := flag.Int("dhcp-port", 67, "LAN DHCP server port")
 	configPath := flag.String("config", "config.json", "persistent configuration path")
 	dhcpLeases := flag.String("dhcp-leases", "dhcp-leases.json", "persistent DHCP leases")
 	networkConfig := flag.String("network-config", "network.json", "saved WAN/LAN interface roles")
 	interfacesDir := flag.String("interfaces-dir", "/etc/network/interfaces.d", "ifupdown interface files")
+	mihomoConfig := flag.String("mihomo-config", "/var/lib/lighten012-pilot-v2/mihomo.yaml", "mihomo configuration file")
 	flag.Parse()
 	if *dnsPort < 1 || *dnsPort > 65535 {
 		log.Fatal("invalid DNS port")
@@ -191,6 +196,13 @@ func main() {
 		log.Fatalf("load config: %v", err)
 	}
 	r := newResolver(c)
+	proxy, err := newProxyWhitelist(*mihomoConfig + ".whitelist.json")
+	if err != nil {
+		log.Fatalf("load proxy whitelist: %v", err)
+	}
+	r.proxy = proxy
+	mihomo := newMihomoClient(*mihomoConfig)
+	mihomo.whitelist = proxy
 	network, err := newNetworkManager(*networkConfig, *interfacesDir, *webAddr)
 	if err != nil {
 		log.Fatalf("load network roles: %v", err)
@@ -205,6 +217,7 @@ func main() {
 		log.Fatalf("read IPv4 forwarding: %v", err)
 	}
 	network.forward = forwarding
+	forwarding.proxy = proxy
 	if network.roles != nil {
 		lan, err := currentIPv4(network.roles.LAN)
 		if err != nil {
@@ -228,7 +241,7 @@ func main() {
 		change.commit()
 		dhcpChange.commit()
 	}
-	web := &http.Server{Addr: *webAddr, Handler: (&app{resolver: r, network: network, path: *configPath}).routes(), ReadHeaderTimeout: 5 * time.Second}
+	web := &http.Server{Addr: *webAddr, Handler: (&app{resolver: r, network: network, mihomo: mihomo, path: *configPath}).routes(), ReadHeaderTimeout: 5 * time.Second}
 	errCh := make(chan error, 1)
 	go func() { errCh <- web.ListenAndServe() }()
 	log.Printf("Pilot v2 web http://%s; DNS follows selected LAN", *webAddr)
