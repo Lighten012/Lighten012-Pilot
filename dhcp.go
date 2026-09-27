@@ -239,6 +239,26 @@ func (s *dhcpService) ipForMAC(mac string) (netip.Addr, bool) {
 	return netip.Addr{}, false
 }
 
+func (s *dhcpService) currentLeases() []dhcpLease {
+	s.mu.Lock()
+	server := s.active
+	if server == nil {
+		s.mu.Unlock()
+		return nil
+	}
+	server.mu.Lock()
+	s.mu.Unlock()
+	defer server.mu.Unlock()
+	now := time.Now().Unix()
+	leases := make([]dhcpLease, 0, len(server.leases))
+	for _, lease := range server.leases {
+		if lease.Expires > now {
+			leases = append(leases, lease)
+		}
+	}
+	return leases
+}
+
 func (s *dhcpServer) close() {
 	_ = s.conn.Close()
 	<-s.done

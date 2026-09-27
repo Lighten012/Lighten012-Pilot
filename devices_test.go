@@ -18,3 +18,16 @@ func TestParseLANDevices(t *testing.T) {
 		t.Fatalf("unexpected LAN devices: %+v", devices)
 	}
 }
+
+func TestLANDevicePresenceUsesCurrentLeaseMAC(t *testing.T) {
+	leases := []dhcpLease{{IP: "10.0.0.105", MAC: "bc:24:11:10:cd:c7"}, {IP: "10.0.0.106", MAC: "aa:bb:cc:dd:ee:06"}}
+	neighbors := []lanDevice{{IP: "10.0.0.2", MAC: "bc:24:11:10:cd:c7", State: "STALE"}, {IP: "10.0.0.105", MAC: "bc:24:11:ca:d6:60", State: "STALE"}}
+	devices := lanDeviceCandidates(leases, neighbors)
+	if len(devices) != 2 || devices[0].MAC != "bc:24:11:10:cd:c7" {
+		t.Fatalf("stale MAC displaced current lease: %+v", devices)
+	}
+	devices = classifyLANDevices(devices, map[string]arpProbe{"10.0.0.105": {MAC: "bc:24:11:10:cd:c7"}, "10.0.0.106": {}})
+	if devices[0].State != "ONLINE" || devices[1].State != "OFFLINE" {
+		t.Fatalf("wrong presence states: %+v", devices)
+	}
+}

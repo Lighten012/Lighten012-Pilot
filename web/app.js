@@ -98,7 +98,7 @@ function renderNetwork(state) {
 function renderDevices(devices, fullDevices = {}) {
   const body = $("devices");
   body.replaceChildren();
-  $("device-count").textContent = `${devices.length} 台设备`;
+  $("device-count").textContent = `${devices.filter((device) => device.state === "ONLINE").length} 在线 / ${devices.length} 已知`;
   if (!devices.length) {
     const row = node("tr", "", ""), cell = node("td", "empty-row", "暂未发现 LAN 设备，设备通信后可刷新查看。");
     cell.colSpan = 4;
@@ -106,7 +106,7 @@ function renderDevices(devices, fullDevices = {}) {
     body.append(row);
     return;
   }
-  const labels = { REACHABLE: "活跃", STALE: "最近出现", DELAY: "正在确认", PROBE: "正在确认", PERMANENT: "固定", NOARP: "固定" };
+  const labels = { ONLINE: "在线", OFFLINE: "离线", MISMATCH: "IP 对应的 MAC 已变化", UNKNOWN: "待确认" };
   for (const device of devices) {
     const row = node("tr", "", "");
     for (const value of [device.ip, device.mac]) {
@@ -115,7 +115,7 @@ function renderDevices(devices, fullDevices = {}) {
       row.append(cell);
     }
     const stateCell = node("td", "", "");
-    stateCell.append(node("span", `device-state${device.state === "REACHABLE" ? " active" : ""}`, labels[device.state] || device.state));
+    stateCell.append(node("span", `device-state${device.state === "ONLINE" ? " active" : device.state === "OFFLINE" ? " offline" : device.state === "MISMATCH" ? " mismatch" : ""}`, labels[device.state] || device.state));
     row.append(stateCell);
     const modeCell = node("td", "", "");
     const toggle = node("button", `button secondary${fullDevices[device.mac] ? " active" : ""}`, fullDevices[device.mac] ? "全部经 Mihomo" : "白名单分流");
