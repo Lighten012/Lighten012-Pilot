@@ -195,7 +195,7 @@ function renderRecords() {
   }
   records.forEach((record, index) => {
     const row = node("tr", "", "");
-    for (const value of [record.name, record.type, record.value, record.mac || "所有设备", String(record.ttl)]) {
+    for (const value of [record.name, record.type, record.mac ? "跟随 DHCP" : record.value, record.mac || "—", String(record.ttl)]) {
       const cell = node("td", "", "");
       cell.append(node("code", "", value));
       row.append(cell);
@@ -221,13 +221,26 @@ async function loadDNS() {
   }
 }
 
+function updateTargetKind() {
+  const device = $("target-kind").value === "device";
+  $("value-field").hidden = device;
+  $("mac-field").hidden = !device;
+  $("value").required = !device;
+  $("mac").required = device;
+  $("type").value = device ? "A" : $("type").value;
+  $("type").disabled = device;
+}
+$("target-kind").onchange = updateTargetKind;
+updateTargetKind();
+
 $("add-form").onsubmit = (event) => {
   event.preventDefault();
   const name = $("name").value.trim().replace(/\.$/, "").toLowerCase();
-  const type = $("type").value, value = $("value").value.trim(), ttl = Number($("ttl").value);
-  const mac = $("mac").value.trim().toLowerCase().replace(/-/g, ":");
-  if (records.some((record) => record.name === name && record.type === type && (record.mac || "") === mac)) {
-    message("message", "同一域名、类型和设备只能添加一次", true);
+  const device = $("target-kind").value === "device";
+  const type = $("type").value, value = device ? "" : $("value").value.trim(), ttl = Number($("ttl").value);
+  const mac = device ? $("mac").value.trim().toLowerCase().replace(/-/g, ":") : "";
+  if (records.some((record) => record.name === name && record.type === type)) {
+    message("message", "同一域名和类型只能添加一条记录；请先删除旧记录", true);
     return;
   }
   records.push({ name, type, value, ttl, mac });

@@ -23,8 +23,8 @@ type Resolver struct {
 	mu                                sync.RWMutex
 	config                            Config
 	records                           map[string][]dns.RR
-	deviceRecords                     map[string]map[string][]dns.RR
-	macForIP                          func(netip.Addr) string
+	macRecords                        map[string]Record
+	ipForMAC                          func(string) (netip.Addr, bool)
 	slots                             chan struct{}
 	queries, local, forwarded, failed atomic.Uint64
 }
@@ -37,21 +37,18 @@ func newResolver(c Config) *Resolver {
 
 func (r *Resolver) setConfig(c Config) {
 	records := make(map[string][]dns.RR)
-	deviceRecords := make(map[string]map[string][]dns.RR)
+	macRecords := make(map[string]Record)
 	for _, v := range c.Records {
 		if v.MAC == "" {
 			records[v.Name] = append(records[v.Name], recordRR(v))
 		} else {
-			if deviceRecords[v.Name] == nil {
-				deviceRecords[v.Name] = make(map[string][]dns.RR)
-			}
-			deviceRecords[v.Name][v.MAC] = append(deviceRecords[v.Name][v.MAC], recordRR(v))
+			macRecords[v.Name] = v
 		}
 	}
 	r.mu.Lock()
 	r.config = c
 	r.records = records
-	r.deviceRecords = deviceRecords
+	r.macRecords = macRecords
 	r.mu.Unlock()
 }
 
@@ -74,7 +71,7 @@ func reply(q *dns.Msg, code int) *dns.Msg {
 	return m
 }
 
-func (r *Resolver) resolve(ctx context.Context, q *dns.Msg, transport string, clientIP ...netip.Addr) *dns.Msg {
+func (r *Resolver) resolve(ctx context.Context, q *dns.Msg, transport string) *dns.Msg {
 	r.queries.Add(1)
 	if q.Response || q.Opcode != dns.OpcodeQuery || len(q.Question) != 1 || q.Question[0].Qclass != dns.ClassINET {
 		return reply(q, dns.RcodeFormatError)
@@ -83,38 +80,39 @@ func (r *Resolver) resolve(ctx context.Context, q *dns.Msg, transport string, cl
 	if question.Qtype == dns.TypeAXFR || question.Qtype == dns.TypeIXFR || q.IsTsig() != nil {
 		return reply(q, dns.RcodeRefused)
 	}
-	mac := ""
-	if len(clientIP) > 0 && r.macForIP != nil {
-		mac = r.macForIP(clientIP[0])
-	}
 	r.mu.RLock()
 	name := strings.TrimSuffix(strings.ToLower(question.Name), ".")
 	known, found := r.records[name]
-	device := r.deviceRecords[name][mac]
-	if len(device) > 0 {
+	macRecord, dynamic := r.macRecords[name]
+	if dynamic {
 		found = true
 	}
 	upstream := r.config.Upstream
+	r.mu.RUnlock()
 	if found {
 		out := reply(q, dns.RcodeSuccess)
 		out.Authoritative = true
-		deviceTypes := make(map[uint16]bool, len(device))
-		for _, rr := range device {
-			deviceTypes[rr.Header().Rrtype] = true
+		if dynamic && (question.Qtype == dns.TypeA || question.Qtype == dns.TypeANY) {
+			if r.ipForMAC == nil {
+				r.failed.Add(1)
+				return reply(q, dns.RcodeServerFailure)
+			}
+			ip, ok := r.ipForMAC(macRecord.MAC)
+			if !ok {
+				r.failed.Add(1)
+				return reply(q, dns.RcodeServerFailure)
+			}
+			macRecord.Value = ip.String()
+			out.Answer = append(out.Answer, recordRR(macRecord))
+		}
+		for _, rr := range known {
 			if rr.Header().Rrtype == question.Qtype || question.Qtype == dns.TypeANY {
 				out.Answer = append(out.Answer, dns.Copy(rr))
 			}
 		}
-		for _, rr := range known {
-			if !deviceTypes[rr.Header().Rrtype] && (rr.Header().Rrtype == question.Qtype || question.Qtype == dns.TypeANY) {
-				out.Answer = append(out.Answer, dns.Copy(rr))
-			}
-		}
-		r.mu.RUnlock()
 		r.local.Add(1)
 		return out
 	}
-	r.mu.RUnlock()
 	select {
 	case r.slots <- struct{}{}:
 		defer func() { <-r.slots }()
@@ -154,7 +152,7 @@ func (r *Resolver) serveDNS(w dns.ResponseWriter, q *dns.Msg, allowed netip.Pref
 	if _, ok := w.RemoteAddr().(*net.TCPAddr); ok {
 		transport = "tcp"
 	}
-	answer := r.resolve(context.Background(), q, transport, ip.Unmap())
+	answer := r.resolve(context.Background(), q, transport)
 	if transport == "udp" {
 		size := 512
 		if opt := q.IsEdns0(); opt != nil {

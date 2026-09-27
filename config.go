@@ -53,18 +53,24 @@ func normalize(c Config) (Config, error) {
 		if !validName(r.Name) {
 			return c, fmt.Errorf("第 %d 条记录的域名无效", i+1)
 		}
-		ip, err := netip.ParseAddr(r.Value)
-		if err != nil || (r.Type != "A" && r.Type != "AAAA") || (r.Type == "A" && !ip.Is4()) || (r.Type == "AAAA" && !ip.Is6()) {
-			return c, fmt.Errorf("第 %d 条记录的类型或 IP 地址无效", i+1)
+		if r.MAC != "" {
+			if r.Type != "A" || r.Value != "" {
+				return c, fmt.Errorf("第 %d 条 MAC 绑定记录只能使用 A 类型，且不填写固定 IP", i+1)
+			}
+		} else {
+			ip, err := netip.ParseAddr(r.Value)
+			if err != nil || (r.Type != "A" && r.Type != "AAAA") || (r.Type == "A" && !ip.Is4()) || (r.Type == "AAAA" && !ip.Is6()) {
+				return c, fmt.Errorf("第 %d 条记录的类型或 IP 地址无效", i+1)
+			}
+			r.Value = ip.String()
 		}
-		r.Value = ip.String()
 		if r.TTL == 0 {
 			r.TTL = 60
 		}
 		if r.TTL > 86400 {
 			return c, fmt.Errorf("第 %d 条记录的 TTL 不能超过 86400", i+1)
 		}
-		key := r.Name + "/" + r.Type + "/" + r.MAC
+		key := r.Name + "/" + r.Type
 		if seen[key] {
 			return c, fmt.Errorf("重复记录：%s", key)
 		}
