@@ -18,6 +18,7 @@ type Record struct {
 	Type  string `json:"type"`
 	Value string `json:"value"`
 	TTL   uint32 `json:"ttl"`
+	MAC   string `json:"mac,omitempty"`
 }
 
 type Config struct {
@@ -41,6 +42,14 @@ func normalize(c Config) (Config, error) {
 		r.Name = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(r.Name), "."))
 		r.Type = strings.ToUpper(strings.TrimSpace(r.Type))
 		r.Value = strings.TrimSpace(r.Value)
+		r.MAC = strings.TrimSpace(r.MAC)
+		if r.MAC != "" {
+			mac, err := net.ParseMAC(r.MAC)
+			if err != nil || len(mac) != 6 {
+				return c, fmt.Errorf("第 %d 条记录的 MAC 地址无效", i+1)
+			}
+			r.MAC = mac.String()
+		}
 		if !validName(r.Name) {
 			return c, fmt.Errorf("第 %d 条记录的域名无效", i+1)
 		}
@@ -55,7 +64,7 @@ func normalize(c Config) (Config, error) {
 		if r.TTL > 86400 {
 			return c, fmt.Errorf("第 %d 条记录的 TTL 不能超过 86400", i+1)
 		}
-		key := r.Name + "/" + r.Type
+		key := r.Name + "/" + r.Type + "/" + r.MAC
 		if seen[key] {
 			return c, fmt.Errorf("重复记录：%s", key)
 		}

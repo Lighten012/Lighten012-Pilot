@@ -199,6 +199,7 @@ func main() {
 	network.dns = dnsService
 	dhcpService := newDHCPService(*dhcpLeases, *dhcpPort)
 	network.dhcp = dhcpService
+	r.macForIP = dhcpService.macForIP
 	forwarding, err := newForwarder()
 	if err != nil {
 		log.Fatalf("read IPv4 forwarding: %v", err)

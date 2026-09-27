@@ -188,14 +188,14 @@ function renderRecords() {
   $("count").textContent = `${records.length} 条记录`;
   if (!records.length) {
     const row = node("tr", "", ""), cell = node("td", "empty-row", "还没有记录，先添加一条吧。");
-    cell.colSpan = 5;
+    cell.colSpan = 6;
     row.append(cell);
     body.append(row);
     return;
   }
   records.forEach((record, index) => {
     const row = node("tr", "", "");
-    for (const value of [record.name, record.type, record.value, String(record.ttl)]) {
+    for (const value of [record.name, record.type, record.value, record.mac || "所有设备", String(record.ttl)]) {
       const cell = node("td", "", "");
       cell.append(node("code", "", value));
       row.append(cell);
@@ -225,14 +225,16 @@ $("add-form").onsubmit = (event) => {
   event.preventDefault();
   const name = $("name").value.trim().replace(/\.$/, "").toLowerCase();
   const type = $("type").value, value = $("value").value.trim(), ttl = Number($("ttl").value);
-  if (records.some((record) => record.name === name && record.type === type)) {
-    message("message", "同一域名和类型只能添加一次", true);
+  const mac = $("mac").value.trim().toLowerCase().replace(/-/g, ":");
+  if (records.some((record) => record.name === name && record.type === type && (record.mac || "") === mac)) {
+    message("message", "同一域名、类型和设备只能添加一次", true);
     return;
   }
-  records.push({ name, type, value, ttl });
+  records.push({ name, type, value, ttl, mac });
   renderRecords();
   $("name").value = "";
   $("value").value = "";
+  $("mac").value = "";
   message("message", "有未保存的修改");
 };
 $("save").onclick = async () => {

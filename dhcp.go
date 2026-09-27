@@ -218,6 +218,28 @@ func (s *dhcpService) close() {
 	}
 }
 
+// macForIP only trusts a current lease on the active LAN DHCP server.
+func (s *dhcpService) macForIP(ip netip.Addr) string {
+	s.mu.Lock()
+	server := s.active
+	if server == nil {
+		s.mu.Unlock()
+		return ""
+	}
+	server.mu.Lock()
+	s.mu.Unlock()
+	defer server.mu.Unlock()
+	if !server.config.contains(ip) {
+		return ""
+	}
+	for mac, lease := range server.leases {
+		if lease.IP == ip.String() && lease.Expires > time.Now().Unix() {
+			return mac
+		}
+	}
+	return ""
+}
+
 func (s *dhcpServer) close() {
 	_ = s.conn.Close()
 	<-s.done
