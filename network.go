@@ -26,6 +26,7 @@ type networkState struct {
 	Interfaces []interfaceInfo `json:"interfaces"`
 	Roles      *networkRoles   `json:"roles"`
 	LANAddress string          `json:"lanAddress"`
+	DHCPRange  string          `json:"dhcpRange"`
 }
 
 type networkManager struct {
@@ -36,6 +37,7 @@ type networkManager struct {
 	webAddress    string
 	runIP         func(...string) error
 	dns           *dnsService
+	dhcp          *dhcpService
 	forward       *forwarder
 }
 
@@ -74,6 +76,9 @@ func (m *networkManager) state() (networkState, error) {
 		state.Roles = &roles
 		if lan, err := currentIPv4(m.roles.LAN); err == nil {
 			state.LANAddress = lan.String()
+			if pool, err := makeDHCPConfig(lan); err == nil {
+				state.DHCPRange = dhcpAddr(pool.Start).String() + "–" + dhcpAddr(pool.End).String()
+			}
 		}
 	}
 	return state, nil
@@ -114,9 +119,22 @@ func (m *networkManager) selectRoles(roles networkRoles) error {
 			return err
 		}
 	}
+	var dhcpChange *dhcpChange
+	if m.dhcp != nil {
+		dhcpChange, err = m.dhcp.stage(roles.LAN, lan)
+		if err != nil {
+			if dnsChange != nil {
+				dnsChange.abort()
+			}
+			return err
+		}
+	}
 	if m.forward != nil {
 		if err := m.forward.apply(roles, lan); err != nil {
 			cleanupErr := m.forward.close()
+			if dhcpChange != nil {
+				dhcpChange.abort()
+			}
 			if dnsChange != nil {
 				dnsChange.abort()
 			}
@@ -129,6 +147,9 @@ func (m *networkManager) selectRoles(roles networkRoles) error {
 		if m.forward != nil {
 			cleanupErr = m.forward.close()
 		}
+		if dhcpChange != nil {
+			dhcpChange.abort()
+		}
 		if dnsChange != nil {
 			dnsChange.abort()
 		}
@@ -139,6 +160,9 @@ func (m *networkManager) selectRoles(roles networkRoles) error {
 		if m.forward != nil {
 			cleanupErr = m.forward.close()
 		}
+		if dhcpChange != nil {
+			dhcpChange.abort()
+		}
 		if dnsChange != nil {
 			dnsChange.abort()
 		}
@@ -147,6 +171,9 @@ func (m *networkManager) selectRoles(roles networkRoles) error {
 	m.roles = &roles
 	if dnsChange != nil {
 		dnsChange.commit()
+	}
+	if dhcpChange != nil {
+		dhcpChange.commit()
 	}
 	return nil
 }
@@ -201,9 +228,23 @@ func (m *networkManager) changeLANAddress(value string) error {
 			return errors.Join(err, removeErr)
 		}
 	}
+	var dhcpChange *dhcpChange
+	if m.dhcp != nil {
+		dhcpChange, err = m.dhcp.stage(m.roles.LAN, newAddress)
+		if err != nil {
+			if dnsChange != nil {
+				dnsChange.abort()
+			}
+			removeErr := m.runIP("-4", "address", "del", newAddress.String(), "dev", m.roles.LAN)
+			return errors.Join(err, removeErr)
+		}
+	}
 	if m.forward != nil {
 		if err := m.forward.apply(*m.roles, newAddress); err != nil {
 			restoreErr := m.forward.apply(*m.roles, oldAddress)
+			if dhcpChange != nil {
+				dhcpChange.abort()
+			}
 			if dnsChange != nil {
 				dnsChange.abort()
 			}
@@ -219,6 +260,9 @@ func (m *networkManager) changeLANAddress(value string) error {
 		if dnsChange != nil {
 			dnsChange.abort()
 		}
+		if dhcpChange != nil {
+			dhcpChange.abort()
+		}
 		removeErr := m.runIP("-4", "address", "del", newAddress.String(), "dev", m.roles.LAN)
 		return errors.Join(fmt.Errorf("保存 LAN 地址失败：%w", err), restoreForwardErr, removeErr)
 	}
@@ -230,12 +274,18 @@ func (m *networkManager) changeLANAddress(value string) error {
 		if dnsChange != nil {
 			dnsChange.abort()
 		}
+		if dhcpChange != nil {
+			dhcpChange.abort()
+		}
 		restoreErr := writeAtomic(path, oldFile, 0644)
 		removeErr := m.runIP("-4", "address", "del", newAddress.String(), "dev", m.roles.LAN)
 		return errors.Join(fmt.Errorf("移除原地址失败：%w", err), restoreForwardErr, restoreErr, removeErr)
 	}
 	if dnsChange != nil {
 		dnsChange.commit()
+	}
+	if dhcpChange != nil {
+		dhcpChange.commit()
 	}
 	return nil
 }

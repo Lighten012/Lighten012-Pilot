@@ -85,6 +85,7 @@ function renderNetwork(state) {
   $("lan-name").textContent = state.roles.lan;
   $("wan-address").textContent = wan?.addresses.find((address) => address.includes(".")) || "暂无 IPv4";
   $("lan-address").textContent = state.lanAddress || "暂无 IPv4";
+  $("dhcp-range").textContent = state.dhcpRange ? `DHCP 自动分配 ${state.dhcpRange}` : "DHCP 未启用";
   const [address, prefix] = (state.lanAddress || "").split("/");
   $("dns-test-hint").textContent = address ? `nslookup lighten012.home ${address}` : "LAN 暂无 IPv4 地址";
   $("lan-ip").value = address || "";

@@ -174,12 +174,17 @@ func decodeRequest(w http.ResponseWriter, r *http.Request, v any) error {
 func main() {
 	webAddr := flag.String("web", "127.0.0.1:8080", "web listen address")
 	dnsPort := flag.Int("dns-port", 53, "LAN DNS port")
+	dhcpPort := flag.Int("dhcp-port", 67, "LAN DHCP server port")
 	configPath := flag.String("config", "config.json", "persistent configuration path")
+	dhcpLeases := flag.String("dhcp-leases", "dhcp-leases.json", "persistent DHCP leases")
 	networkConfig := flag.String("network-config", "network.json", "saved WAN/LAN interface roles")
 	interfacesDir := flag.String("interfaces-dir", "/etc/network/interfaces.d", "ifupdown interface files")
 	flag.Parse()
 	if *dnsPort < 1 || *dnsPort > 65535 {
 		log.Fatal("invalid DNS port")
+	}
+	if *dhcpPort < 1 || *dhcpPort > 65535 {
+		log.Fatal("invalid DHCP port")
 	}
 	c, err := loadConfig(*configPath)
 	if err != nil {
@@ -192,6 +197,8 @@ func main() {
 	}
 	dnsService := newDNSService(r, *dnsPort)
 	network.dns = dnsService
+	dhcpService := newDHCPService(*dhcpLeases, *dhcpPort)
+	network.dhcp = dhcpService
 	forwarding, err := newForwarder()
 	if err != nil {
 		log.Fatalf("read IPv4 forwarding: %v", err)
@@ -206,12 +213,19 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
+		dhcpChange, err := dhcpService.stage(network.roles.LAN, lan)
+		if err != nil {
+			change.abort()
+			log.Fatalf("enable LAN DHCP: %v", err)
+		}
 		if err := forwarding.apply(*network.roles, lan); err != nil {
+			dhcpChange.abort()
 			change.abort()
 			_ = forwarding.close()
 			log.Fatalf("enable LAN forwarding: %v", err)
 		}
 		change.commit()
+		dhcpChange.commit()
 	}
 	web := &http.Server{Addr: *webAddr, Handler: (&app{resolver: r, network: network, path: *configPath}).routes(), ReadHeaderTimeout: 5 * time.Second}
 	errCh := make(chan error, 1)
@@ -229,6 +243,7 @@ func main() {
 	}
 	_ = web.Close()
 	dnsService.close()
+	dhcpService.close()
 	if err := forwarding.close(); err != nil {
 		log.Printf("stop LAN forwarding: %v", err)
 	}

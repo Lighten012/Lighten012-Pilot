@@ -1,11 +1,11 @@
 [Unit]
-Description=Lighten012 Pilot v2 DNS and Web
+Description=Lighten012 Pilot LAN router
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/opt/lighten012-pilot-v2/pilot -web 192.168.50.178:8080 -config /var/lib/lighten012-pilot-v2/config.json -network-config /var/lib/lighten012-pilot-v2/network.json
+ExecStart=/opt/lighten012-pilot-v2/pilot -web 192.168.50.178:8080 -config /var/lib/lighten012-pilot-v2/config.json -network-config /var/lib/lighten012-pilot-v2/network.json -dhcp-leases /var/lib/lighten012-pilot-v2/dhcp-leases.json
 Restart=on-failure
 RestartSec=3
 User=root
