@@ -90,7 +90,49 @@ function renderNetwork(state) {
   $("lan-ip").value = address || "";
   $("lan-prefix").textContent = prefix ? `/${prefix}` : "";
   $("save-lan-ip").disabled = !address;
+  loadDevices();
 }
+
+function renderDevices(devices) {
+  const body = $("devices");
+  body.replaceChildren();
+  $("device-count").textContent = `${devices.length} 台设备`;
+  if (!devices.length) {
+    const row = node("tr", "", ""), cell = node("td", "empty-row", "暂未发现 LAN 设备，设备通信后可刷新查看。");
+    cell.colSpan = 3;
+    row.append(cell);
+    body.append(row);
+    return;
+  }
+  const labels = { REACHABLE: "活跃", STALE: "最近出现", DELAY: "正在确认", PROBE: "正在确认", PERMANENT: "固定", NOARP: "固定" };
+  for (const device of devices) {
+    const row = node("tr", "", "");
+    for (const value of [device.ip, device.mac]) {
+      const cell = node("td", "", "");
+      cell.append(node("code", "", value));
+      row.append(cell);
+    }
+    const stateCell = node("td", "", "");
+    stateCell.append(node("span", `device-state${device.state === "REACHABLE" ? " active" : ""}`, labels[device.state] || device.state));
+    row.append(stateCell);
+    body.append(row);
+  }
+}
+
+async function loadDevices() {
+  const button = $("refresh-devices");
+  button.disabled = true;
+  message("devices-message", "");
+  try {
+    renderDevices(await request("/api/lan/devices"));
+  } catch (error) {
+    message("devices-message", error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+$("refresh-devices").onclick = loadDevices;
 
 async function loadNetwork() {
   const button = $("refresh-interfaces");

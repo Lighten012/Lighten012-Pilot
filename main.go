@@ -44,6 +44,15 @@ func (a *app) routes() http.Handler {
 		writeJSON(w, http.StatusOK, interfaces)
 	})
 	if a.network != nil {
+		mux.HandleFunc("GET /api/lan/devices", func(w http.ResponseWriter, r *http.Request) {
+			devices, err := a.network.lanDevices()
+			if err != nil {
+				log.Printf("LAN devices: %v", err)
+				http.Error(w, "无法读取 LAN 设备", http.StatusInternalServerError)
+				return
+			}
+			writeJSON(w, http.StatusOK, devices)
+		})
 		mux.HandleFunc("GET /api/network", func(w http.ResponseWriter, r *http.Request) {
 			state, err := a.network.state()
 			if err != nil {

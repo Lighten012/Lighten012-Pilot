@@ -88,6 +88,11 @@ input:focus, select:focus { border-color: #84bd96; box-shadow: 0 0 0 3px #74b895
 .interface-meta { color: #91a095; font-size: 11px; line-height: 1.6; margin: 10px 0; }
 .interface-addresses { display: flex; flex-wrap: wrap; gap: 6px; }
 .interface-addresses code, .dns-hint code { color: #4b795d; background: #eaf3eb; border-radius: 5px; padding: 4px 6px; font-size: 11px; overflow-wrap: anywhere; }
+.devices-actions { display: flex; align-items: center; gap: 10px; }
+.devices-table { min-width: 430px; }
+.devices-table td:last-child { text-align: left; }
+.device-state { display: inline-block; color: #7b8c81; background: #edf2ee; border-radius: 5px; padding: 5px 9px; font-size: 11px; }
+.device-state.active { color: #4b8d55; background: #e8f4e6; }
 .metric-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 17px; margin-bottom: 20px; }
 .metric { padding: 20px 23px; }
 .metric small { color: #829388; font-size: 11px; }

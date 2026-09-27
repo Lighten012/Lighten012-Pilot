@@ -1,6 +1,6 @@
 # Lighten012-Pilot
 
-一个面向个人内网的轻量路由服务。网页可添加和删除自定义 A/AAAA 解析记录、设置上游 DNS，也可选择一次 WAN/LAN 网卡并修改 LAN IPv4 地址。WAN 始终只读；LAN 经 WAN 的 IPv4 转发和 NAT 自动生效，不提供 DHCP 或端口转发。DNS 只监听所选 LAN 网卡的 IPv4 地址，并只接受该 LAN 网段的客户端；LAN IP 修改后 DNS 会同步切换，WAN 不提供 DNS。未命中自定义记录的域名转发给上游（默认 `119.29.29.29`）；DNS 支持 UDP 和 TCP。
+一个面向个人内网的轻量路由服务。网页可添加和删除自定义 A/AAAA 解析记录、设置上游 DNS，也可选择一次 WAN/LAN 网卡、查看 LAN 设备并修改 LAN IPv4 地址。WAN 始终只读；LAN 经 WAN 的 IPv4 转发和 NAT 自动生效，不提供 DHCP 或端口转发。DNS 只监听所选 LAN 网卡的 IPv4 地址，并只接受该 LAN 网段的客户端；LAN IP 修改后 DNS 会同步切换，WAN 不提供 DNS。未命中自定义记录的域名转发给上游（默认 `119.29.29.29`）；DNS 支持 UDP 和 TCP。
 
 服务是一个 Go 程序，网页已经嵌入二进制文件。**可以在本机编译，服务器只运行编译结果**，无需安装 Go、Node.js 或放置源代码。
 
@@ -50,6 +50,10 @@ LAN 页面只接受新的 IPv4 地址，例如从 `192.168.60.1` 改为 `192.168
 
 LAN 客户端需要手动设置同网段 IP、默认网关（当前为 `10.0.0.1`）和 DNS（同为 `10.0.0.1`）。上游连接仍由服务器现有默认路由管理。当前只支持 IPv4；不提供 DHCP、IPv6 转发或端口转发。
 
+## LAN 设备
+
+「LAN 设备」从所选 LAN 网卡的 IPv4 邻居表读取 IP、MAC 和状态，点击刷新可重新读取。只显示带有效 MAC 的记录，不包含解析失败或仍在探测中的无效记录。这是近期通信设备列表，不是主动扫描；尚未与路由器通信的设备不会出现，`最近出现`也不代表此刻仍在线。
+
 ## 使用
 
 在网页输入域名、类型、目标 IP，点击“添加记录”，再点击“保存并应用”。删除记录或更改上游后也要保存。例如添加 `lighten012.home → 10.0.0.1` 后，在 LAN 网段客户端运行：
@@ -61,4 +65,4 @@ nslookup example.com 10.0.0.1
 
 第一条验证自定义记录，第二条验证上游转发。自定义记录只做**精确域名匹配**；同一域名的其他查询类型返回空答案，不会意外转发到上游。
 
-接口：`GET /api/state` 读取 DNS 配置和计数；`GET /api/interfaces` 只读网卡列表；`GET /api/network` 读取 WAN/LAN 选择；`PUT /api/network/roles` 保存接口角色；`PUT /api/network/lan-ip` 修改 LAN IPv4；`PUT /api/config` 保存 DNS 配置。修改请求需带 `X-Pilot-Request: 1` 请求头，网页会自动处理。
+接口：`GET /api/state` 读取 DNS 配置和计数；`GET /api/interfaces` 只读网卡列表；`GET /api/network` 读取 WAN/LAN 选择；`GET /api/lan/devices` 读取 LAN 邻居表；`PUT /api/network/roles` 保存接口角色；`PUT /api/network/lan-ip` 修改 LAN IPv4；`PUT /api/config` 保存 DNS 配置。修改请求需带 `X-Pilot-Request: 1` 请求头，网页会自动处理。
