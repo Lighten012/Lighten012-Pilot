@@ -25,17 +25,17 @@ go build -trimpath -o pilot-linux-amd64 .
 
 ## 运行
 
-将编译好的文件复制到服务器。53 和 67 端口需要相应权限；长期运行可以参考 [`deploy/lighten012-pilot-v2.service`](deploy/lighten012-pilot-v2.service)。示例命令：
+将编译好的文件复制到服务器。53 和 67 端口需要相应权限；长期运行可以参考 [`deploy/lighten012-pilot.service`](deploy/lighten012-pilot.service)。示例命令：
 
 ```sh
 ./pilot-linux-amd64 \
   -web 0.0.0.0:80 \
-  -config /var/lib/lighten012-pilot-v2/config.json \
-  -network-config /var/lib/lighten012-pilot-v2/network.json \
-  -dhcp-leases /var/lib/lighten012-pilot-v2/dhcp-leases.json
+  -config /var/lib/lighten012-pilot/config.json \
+  -network-config /var/lib/lighten012-pilot/network.json \
+  -dhcp-leases /var/lib/lighten012-pilot/dhcp-leases.json
 ```
 
-当前部署在 `192.168.50.178`：Web 监听所有 IPv4 接口的 80 端口，可通过 `http://192.168.50.178/` 或 `http://10.0.0.1/` 打开。DNS 和 DHCP 由保存的 LAN 网卡决定，目前 LAN 地址是 `10.0.0.1`。未选择 WAN/LAN 角色时，两项服务都不监听；保存角色后立即启动。管理页面没有账号或密钥，仅应在可信网络中运行。
+当前部署在 `192.168.50.24`：Web 监听所有 IPv4 接口的 80 端口，可通过 `http://192.168.50.24/` 或 `http://10.0.0.1/` 打开。DNS 和 DHCP 由保存的 LAN 网卡决定，目前 LAN 地址是 `10.0.0.1`。未选择 WAN/LAN 角色时，两项服务都不监听；保存角色后立即启动。管理页面没有账号或密钥，仅应在可信网络中运行。
 
 ## WAN / LAN
 
@@ -82,12 +82,12 @@ nslookup example.com 10.0.0.1
 
 ## Mihomo 管理模块
 
-侧边栏的 Mihomo 页面管理独立运行的 Mihomo 核心：查看版本、运行模式、流量速率、活动连接与代理组；切换手动代理组、测试当前节点延迟、重载配置，以及保存和更新订阅链接。Pilot 通过容器内 `127.0.0.1:9090` 访问核心，浏览器不会直接连接控制接口。
+侧边栏的 Mihomo 页面管理独立运行的 Mihomo 核心：查看版本、运行模式、流量速率、活动连接与代理组；切换手动代理组、测试当前节点延迟、重载配置，以及保存和更新订阅链接。Pilot 通过本机 `127.0.0.1:9090` 访问核心，浏览器不会直接连接控制接口。
 
-部署时从 [Mihomo 官方发行版](https://github.com/MetaCubeX/mihomo/releases)选择匹配架构的二进制，安装为 `/usr/local/bin/mihomo`，将 [`deploy/mihomo.yaml`](deploy/mihomo.yaml) 复制到 `/var/lib/lighten012-pilot-v2/mihomo.yaml`，将 [`deploy/lighten012-mihomo.service`](deploy/lighten012-mihomo.service) 复制到 `/etc/systemd/system/`，然后执行 `systemctl daemon-reload && systemctl enable --now lighten012-mihomo`。当前 Debian x86-64 容器使用 v1.19.31 的 `linux-amd64-v1` 发行包，已按 GitHub SHA-256 校验。
+部署时从 [Mihomo 官方发行版](https://github.com/MetaCubeX/mihomo/releases)选择匹配架构的二进制，安装为 `/usr/local/bin/mihomo`，将 [`deploy/mihomo.yaml`](deploy/mihomo.yaml) 复制到 `/var/lib/lighten012-pilot/mihomo.yaml`，将 [`deploy/lighten012-mihomo.service`](deploy/lighten012-mihomo.service) 复制到 `/etc/systemd/system/`，然后执行 `systemctl daemon-reload && systemctl enable --now lighten012-mihomo`。当前 Debian x86-64 虚拟机使用 v1.19.31 的 `linux-amd64-v1` 发行包，已按 GitHub SHA-256 校验。
 
 网页只需输入 HTTP(S) 订阅链接。Pilot 下载最多 1 MiB 的 Mihomo/Clash YAML，生成 Pilot 使用的本机 DNS、透明代理和控制端口配置，再调用 `mihomo -t` 校验、应用并重载；失败会恢复旧配置。订阅链接保存在配置旁的 `.subscription` 文件中，权限为 `0600`，页面只显示域名，之后可点“更新订阅”重新拉取。当前不支持只返回 Base64 节点列表的订阅。导入后，代理组与节点会出现在页面上。
 
-全局域名白名单只接受域名，例如 `google.com`，并匹配其子域名；不能按 HTTPS URL 路径分流。白名单保存在 `/var/lib/lighten012-pilot-v2/mihomo.yaml.whitelist.json`。LAN 设备仍向 Pilot 的 53 端口查询 DNS；Pilot 将白名单域名转给 Mihomo 在 `127.0.0.1:1053` 的 DNS，其他域名继续用本地记录或 Pilot 上游 DNS。Mihomo 对白名单域名返回 fake-IP，Pilot 把应答中的 A 地址放入带 TTL 的 `PILOT_PROXY_IPS` ipset；来自 LAN、目标命中该集合的 TCP 连接由专用 `PILOT_PROXY` iptables 链转到 Mihomo 的 7893 端口，UDP 连接经 TProxy 7896 入口交给 Mihomo，其余流量照常由 Pilot 转发。Mihomo 使用独立的节点引导 DNS，避免查询循环。订阅更新后会重新生成这些规则，不采用订阅自带的分流规则。运行环境需要 `ipset` 和内核的 REDIRECT/TProxy 支持。当前仅支持 IPv4；白名单模式的客户端必须使用 Pilot DNS，其他 DNS、缓存或直接连 IP 的连接可能绕过白名单。
+全局域名白名单只接受域名，例如 `google.com`，并匹配其子域名；不能按 HTTPS URL 路径分流。白名单保存在 `/var/lib/lighten012-pilot/mihomo.yaml.whitelist.json`。LAN 设备仍向 Pilot 的 53 端口查询 DNS；Pilot 将白名单域名转给 Mihomo 在 `127.0.0.1:1053` 的 DNS，其他域名继续用本地记录或 Pilot 上游 DNS。Mihomo 对白名单域名返回 fake-IP，Pilot 把应答中的 A 地址放入带 TTL 的 `PILOT_PROXY_IPS` ipset；来自 LAN、目标命中该集合的 TCP 连接由专用 `PILOT_PROXY` iptables 链转到 Mihomo 的 7893 端口，UDP 连接经 TProxy 7896 入口交给 Mihomo，其余流量照常由 Pilot 转发。Mihomo 使用独立的节点引导 DNS，避免查询循环。订阅更新后会重新生成这些规则，不采用订阅自带的分流规则。运行环境需要 `ipset` 和内核的 REDIRECT/TProxy 支持。当前仅支持 IPv4；白名单模式的客户端必须使用 Pilot DNS，其他 DNS、缓存或直接连 IP 的连接可能绕过白名单。
 
-LAN 设备列表还可按 MAC 地址切换“全部经 Mihomo”。开启后，该设备的公网 TCP 连接重定向到 Mihomo 的 7894 入口，UDP 连接经 TProxy 7895 入口，均直接使用白名单页面选择的代理组，不再检查域名白名单；关闭后回到原有白名单分流。设置保存在 `/var/lib/lighten012-pilot-v2/mihomo.yaml.whitelist.json.devices.json`，DHCP 重新分配 IP 后仍生效。LAN 私有地址保持直连。UDP TProxy 使用 fwmark `0x102` 和路由表 `102`；Pilot 仍是设备网关，本地 DNS 查询仍由 Pilot 处理。
+LAN 设备列表还可按 MAC 地址切换“全部经 Mihomo”。开启后，该设备的公网 TCP 连接重定向到 Mihomo 的 7894 入口，UDP 连接经 TProxy 7895 入口，均直接使用白名单页面选择的代理组，不再检查域名白名单；关闭后回到原有白名单分流。设置保存在 `/var/lib/lighten012-pilot/mihomo.yaml.whitelist.json.devices.json`，DHCP 重新分配 IP 后仍生效。LAN 私有地址保持直连。UDP TProxy 使用 fwmark `0x102` 和路由表 `102`；Pilot 仍是设备网关，本地 DNS 查询仍由 Pilot 处理。

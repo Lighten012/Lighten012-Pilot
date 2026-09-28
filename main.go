@@ -183,7 +183,7 @@ func main() {
 	dhcpLeases := flag.String("dhcp-leases", "dhcp-leases.json", "persistent DHCP leases")
 	networkConfig := flag.String("network-config", "network.json", "saved WAN/LAN interface roles")
 	interfacesDir := flag.String("interfaces-dir", "/etc/network/interfaces.d", "ifupdown interface files")
-	mihomoConfig := flag.String("mihomo-config", "/var/lib/lighten012-pilot-v2/mihomo.yaml", "mihomo configuration file")
+	mihomoConfig := flag.String("mihomo-config", "/var/lib/lighten012-pilot/mihomo.yaml", "mihomo configuration file")
 	flag.Parse()
 	if *dnsPort < 1 || *dnsPort > 65535 {
 		log.Fatal("invalid DNS port")
@@ -244,7 +244,7 @@ func main() {
 	web := &http.Server{Addr: *webAddr, Handler: (&app{resolver: r, network: network, mihomo: mihomo, path: *configPath}).routes(), ReadHeaderTimeout: 5 * time.Second}
 	errCh := make(chan error, 1)
 	go func() { errCh <- web.ListenAndServe() }()
-	log.Printf("Pilot v2 web http://%s; DNS follows selected LAN", *webAddr)
+	log.Printf("Pilot web http://%s; DNS follows selected LAN", *webAddr)
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGTERM, syscall.SIGINT)
 	select {

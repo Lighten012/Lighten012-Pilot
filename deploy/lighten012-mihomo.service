@@ -5,11 +5,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/mihomo -d /var/lib/lighten012-pilot-v2 -f /var/lib/lighten012-pilot-v2/mihomo.yaml
+ExecStart=/usr/local/bin/mihomo -d /var/lib/lighten012-pilot -f /var/lib/lighten012-pilot/mihomo.yaml
 Restart=on-failure
 RestartSec=3
 User=root
-StateDirectory=lighten012-pilot-v2
+StateDirectory=lighten012-pilot
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
