@@ -124,11 +124,8 @@ td:last-child { text-align: right; }
 .mihomo-group small { display: block; color: #91a095; font-size: 11px; margin-top: 6px; }
 .mihomo-group-actions { display: flex; align-items: center; gap: 9px; width: min(430px, 60%); }
 .mihomo-group-actions select { flex: 1; min-width: 0; }
-.proxy-whitelist-form { display: grid; grid-template-columns: minmax(180px, 1fr) auto minmax(180px, 1fr); gap: 10px; align-items: end; margin-top: 18px; }
-.proxy-whitelist-form .button { margin-bottom: 0; }
-.proxy-domains { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
-.proxy-domain { display: flex; align-items: center; gap: 9px; border: 1px solid #e2eae3; background: #fafcf9; border-radius: 7px; padding: 6px 7px 6px 11px; }
-.proxy-domain code { color: #315f47; font-size: 12px; }
+.proxy-group-form { display: grid; grid-template-columns: minmax(220px, 360px) auto; gap: 10px; align-items: end; margin-top: 18px; }
+.proxy-group-form .button { margin-bottom: 0; }
 footer { display: flex; justify-content: space-between; gap: 20px; color: #99a69b; font-size: 10px; padding: 26px 0 35px; }
 @media (max-width: 960px) {
   .sidebar { width: 190px; flex-basis: 190px; padding: 25px 12px; }
@@ -165,7 +162,6 @@ footer { display: flex; justify-content: space-between; gap: 20px; color: #99a69
   .edit-row .form-field { flex: 1; min-width: 180px; }
   .mihomo-group { align-items: stretch; flex-direction: column; }
   .mihomo-group-actions { width: 100%; }
-  .proxy-whitelist-form { grid-template-columns: 1fr auto; }
-  .proxy-whitelist-form .form-field:last-child { grid-column: span 2; }
+  .proxy-group-form { grid-template-columns: 1fr auto; }
   footer { font-size: 9px; }
 }

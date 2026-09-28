@@ -16,14 +16,7 @@ type Stats struct {
 	Queries   uint64 `json:"queries"`
 	Local     uint64 `json:"local"`
 	Forwarded uint64 `json:"forwarded"`
-	Mihomo    uint64 `json:"mihomo"`
 	Failed    uint64 `json:"failed"`
-}
-
-// Proxy handles domains selected for Mihomo DNS and observes returned addresses.
-type Proxy interface {
-	Contains(string) bool
-	ObserveDNS(string, *dns.Msg)
 }
 
 type Resolver struct {
@@ -32,11 +25,9 @@ type Resolver struct {
 	records                                   map[string][]dns.RR
 	macRecords                                map[string]Record
 	ipForMAC                                  func(string) (netip.Addr, bool)
-	proxy                                     Proxy
-	mihomoDNSAddr                             string
 	exchange                                  func(context.Context, *dns.Msg, string, string) (*dns.Msg, error)
 	slots                                     chan struct{}
-	queries, local, forwarded, mihomo, failed atomic.Uint64
+	queries, local, forwarded, failed         atomic.Uint64
 }
 
 func NewResolver(c Config) *Resolver   { return newResolver(c) }
@@ -46,15 +37,13 @@ func (r *Resolver) Stats() Stats       { return r.stats() }
 func (r *Resolver) Resolve(ctx context.Context, q *dns.Msg, transport string) *dns.Msg {
 	return r.resolve(ctx, q, transport)
 }
-func (r *Resolver) SetProxy(proxy Proxy)                           { r.proxy = proxy }
 func (r *Resolver) SetIPForMAC(fn func(string) (netip.Addr, bool)) { r.ipForMAC = fn }
-func (r *Resolver) SetMihomoDNSAddr(address string)                { r.mihomoDNSAddr = address }
 func (r *Resolver) SetExchange(fn func(context.Context, *dns.Msg, string, string) (*dns.Msg, error)) {
 	r.exchange = fn
 }
 
 func newResolver(c Config) *Resolver {
-	r := &Resolver{slots: make(chan struct{}, 128), mihomoDNSAddr: "127.0.0.1:1053"}
+	r := &Resolver{slots: make(chan struct{}, 128)}
 	r.setConfig(c)
 	return r
 }
@@ -85,7 +74,7 @@ func (r *Resolver) getConfig() Config {
 }
 
 func (r *Resolver) stats() Stats {
-	return Stats{r.queries.Load(), r.local.Load(), r.forwarded.Load(), r.mihomo.Load(), r.failed.Load()}
+	return Stats{r.queries.Load(), r.local.Load(), r.forwarded.Load(), r.failed.Load()}
 }
 
 func reply(q *dns.Msg, code int) *dns.Msg {
@@ -114,10 +103,6 @@ func (r *Resolver) resolve(ctx context.Context, q *dns.Msg, transport string) *d
 	upstream := r.config.Upstream
 	backupUpstream := r.config.BackupUpstream
 	r.mu.RUnlock()
-	mihomoQuery := r.proxy != nil && r.proxy.Contains(name)
-	if mihomoQuery {
-		found = false
-	}
 	if found {
 		out := reply(q, dns.RcodeSuccess)
 		out.Authoritative = true
@@ -151,14 +136,9 @@ func (r *Resolver) resolve(ctx context.Context, q *dns.Msg, transport string) *d
 	}
 	r.forwarded.Add(1)
 	upstreams := make([]string, 0, 2)
-	if mihomoQuery {
-		upstreams = append(upstreams, r.mihomoDNSAddr)
-		r.mihomo.Add(1)
-	} else {
-		for _, address := range []string{upstream, backupUpstream} {
-			if address != "" && (len(upstreams) == 0 || upstreams[0] != net.JoinHostPort(address, "53")) {
-				upstreams = append(upstreams, net.JoinHostPort(address, "53"))
-			}
+	for _, address := range []string{upstream, backupUpstream} {
+		if address != "" && (len(upstreams) == 0 || upstreams[0] != net.JoinHostPort(address, "53")) {
+			upstreams = append(upstreams, net.JoinHostPort(address, "53"))
 		}
 	}
 	ctx, cancel := context.WithTimeout(ctx, 6*time.Second)
@@ -208,9 +188,6 @@ func (r *Resolver) serveDNS(w dns.ResponseWriter, q *dns.Msg, allowed netip.Pref
 		transport = "tcp"
 	}
 	answer := r.resolve(context.Background(), q, transport)
-	if r.proxy != nil && len(q.Question) == 1 {
-		r.proxy.ObserveDNS(strings.TrimSuffix(strings.ToLower(q.Question[0].Name), "."), answer)
-	}
 	if transport == "udp" {
 		size := 512
 		if opt := q.IsEdns0(); opt != nil {

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -179,13 +180,12 @@ func Run(assets fs.FS) {
 		log.Fatalf("load config: %v", err)
 	}
 	r := dnsservice.NewResolver(c)
-	proxy, err := network.NewProxyWhitelist(*mihomoConfig + ".whitelist.json")
+	proxy, err := network.NewDeviceProxy(filepath.Join(filepath.Dir(*mihomoConfig), "device-proxy.json"), *mihomoConfig+".whitelist.json")
 	if err != nil {
-		log.Fatalf("load proxy whitelist: %v", err)
+		log.Fatalf("load device proxy: %v", err)
 	}
-	r.SetProxy(proxy)
 	mihomo := mihomo.NewClient(*mihomoConfig)
-	mihomo.SetWhitelist(proxy)
+	mihomo.SetDeviceProxy(proxy)
 	manager, err := network.NewManager(*networkConfig, *interfacesDir, *webAddr)
 	if err != nil {
 		log.Fatalf("load network roles: %v", err)

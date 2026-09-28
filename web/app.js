@@ -34,7 +34,7 @@ function switchPage(page) {
     button.classList.toggle("active", button.dataset.page === page);
   });
   $("page-name").textContent = page === "network" ? "WAN / LAN" : page === "dns" ? "DNS 解析" : "Mihomo";
-  if (page === "mihomo") { loadMihomo(); loadProxyWhitelist(); }
+  if (page === "mihomo") { loadMihomo(); loadProxyGroup(); }
 }
 
 document.querySelectorAll("[data-page]").forEach((button) => {
@@ -118,7 +118,7 @@ function renderDevices(devices, fullDevices = {}) {
     stateCell.append(node("span", `device-state${device.state === "ONLINE" ? " active" : device.state === "OFFLINE" ? " offline" : device.state === "MISMATCH" ? " mismatch" : ""}`, labels[device.state] || device.state));
     row.append(stateCell);
     const modeCell = node("td", "", "");
-    const toggle = node("button", `button secondary${fullDevices[device.mac] ? " active" : ""}`, fullDevices[device.mac] ? "全部经 Mihomo" : "白名单分流");
+    const toggle = node("button", `button secondary${fullDevices[device.mac] ? " active" : ""}`, fullDevices[device.mac] ? "全部经 Mihomo" : "直连");
     toggle.type = "button";
     toggle.setAttribute("aria-pressed", String(Boolean(fullDevices[device.mac])));
     toggle.onclick = async () => {
@@ -233,7 +233,7 @@ async function loadDNS() {
     records = data.config.records || [];
     $("upstream").value = data.config.upstream;
     $("backup-upstream").value = data.config.backupUpstream || "";
-    for (const key of ["queries", "local", "forwarded", "mihomo"]) $(key).textContent = data.stats[key].toLocaleString();
+    for (const key of ["queries", "local", "forwarded", "failed"]) $(key).textContent = data.stats[key].toLocaleString();
     renderRecords();
   } catch (error) {
     message("message", error.message, true);
@@ -291,7 +291,7 @@ loadDNS();
 setInterval(async () => {
   try {
     const data = await request("/api/state");
-    for (const key of ["queries", "local", "forwarded", "mihomo"]) $(key).textContent = data.stats[key].toLocaleString();
+    for (const key of ["queries", "local", "forwarded", "failed"]) $(key).textContent = data.stats[key].toLocaleString();
   } catch { /* keep the last visible sample */ }
 }, 10000);
 
@@ -322,7 +322,7 @@ function renderMihomo(data) {
     option.value = group.name;
     groupSelect.append(option);
   }
-  groupSelect.value = previousGroup || proxyWhitelist.group;
+  groupSelect.value = previousGroup || deviceProxyGroup;
   if (!groupSelect.value && groupSelect.options.length) groupSelect.selectedIndex = 0;
   const groups = $("mihomo-groups");
   groups.replaceChildren();
@@ -386,50 +386,21 @@ function renderMihomo(data) {
   }
 }
 
-let proxyWhitelist = { domains: [], group: "" };
-function renderProxyWhitelist() {
-  const list = $("proxy-domains");
-  list.replaceChildren();
-  for (const domain of proxyWhitelist.domains) {
-    const row = node("div", "proxy-domain", "");
-    const label = node("code", "", domain);
-    const remove = node("button", "delete-button", "移除");
-    remove.type = "button";
-    remove.onclick = () => {
-      proxyWhitelist.domains = proxyWhitelist.domains.filter((item) => item !== domain);
-      renderProxyWhitelist();
-    };
-    row.append(label, remove);
-    list.append(row);
-  }
-  if (!proxyWhitelist.domains.length) list.append(node("p", "subtle", "白名单为空：所有 LAN 设备继续由 Pilot 直连。"));
-}
-async function loadProxyWhitelist() {
+let deviceProxyGroup = "";
+async function loadProxyGroup() {
   try {
-    proxyWhitelist = await request("/api/mihomo/whitelist");
-    renderProxyWhitelist();
-    if (proxyWhitelist.group) $("proxy-group").value = proxyWhitelist.group;
+    const data = await request("/api/mihomo/proxy-group");
+    deviceProxyGroup = data.group || "";
+    if (deviceProxyGroup) $("proxy-group").value = deviceProxyGroup;
   } catch (error) { message("proxy-message", error.message, true); }
 }
-$("proxy-add").onclick = () => {
-  const raw = $("proxy-domain").value.trim().toLowerCase().replace(/\.$/, "");
-  if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(raw) || raw.includes("..")) {
-    message("proxy-message", "请只填写域名，例如 google.com", true);
-    return;
-  }
-  if (!proxyWhitelist.domains.includes(raw)) proxyWhitelist.domains.push(raw);
-  $("proxy-domain").value = "";
-  message("proxy-message", "点击保存白名单后生效");
-  renderProxyWhitelist();
-};
-$("proxy-domain").onkeydown = (event) => { if (event.key === "Enter") $("proxy-add").click(); };
 $("proxy-save").onclick = async () => {
   const button = $("proxy-save");
   button.disabled = true;
   try {
-    proxyWhitelist = await request("/api/mihomo/whitelist", mutation("PUT", { domains: proxyWhitelist.domains, group: $("proxy-group").value }));
-    renderProxyWhitelist();
-    message("proxy-message", "白名单已保存并应用");
+    const data = await request("/api/mihomo/proxy-group", mutation("PUT", { group: $("proxy-group").value }));
+    deviceProxyGroup = data.group;
+    message("proxy-message", "代理组已保存并应用");
     await loadMihomo();
   } catch (error) { message("proxy-message", error.message, true); }
   finally { button.disabled = false; }

@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestValidateMihomoConfigKeepsPilotNetworking(t *testing.T) {
@@ -18,7 +20,7 @@ func TestValidateMihomoConfigKeepsPilotNetworking(t *testing.T) {
 		"external controller": "external-controller: 0.0.0.0:9090\n",
 		"dns conflict":        strings.Replace(base, "dns:\n  enable: false", "dns:\n  enable: true", 1),
 		"tun routing":         strings.Replace(base, "tun:\n  enable: false", "tun:\n  enable: true", 1),
-		"lan proxy":           strings.Replace(base, "allow-lan: false", "allow-lan: true", 1),
+		"extra proxy port":    base + "mixed-port: 7890\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := validateMihomoConfig([]byte(config)); err == nil {
@@ -44,6 +46,32 @@ func TestNormalizeSubscriptionKeepsPilotNetworking(t *testing.T) {
 	}
 	if _, err := normalizeSubscription([]byte("cHJveGllczogW10=")); err == nil {
 		t.Fatal("base64 subscription accepted")
+	}
+}
+
+func TestDeviceProxyConfigUsesSelectedGroupAndOnlyTwoListeners(t *testing.T) {
+	base := []byte("external-controller: 127.0.0.1:9090\nproxies: []\nproxy-groups:\n  - name: First\n    type: select\n    proxies: [DIRECT]\n  - name: Second\n    type: select\n    proxies: [DIRECT]\nrules: [MATCH,First]\n")
+	content, group, err := applyDeviceProxyConfig(base, "Second")
+	if err != nil || group != "Second" {
+		t.Fatalf("group=%q err=%v", group, err)
+	}
+	var config map[string]any
+	if err := yaml.Unmarshal(content, &config); err != nil {
+		t.Fatal(err)
+	}
+	listeners := config["listeners"].([]any)
+	if len(listeners) != 2 || listeners[0].(map[string]any)["proxy"] != "Second" || listeners[1].(map[string]any)["proxy"] != "Second" {
+		t.Fatalf("listeners: %#v", listeners)
+	}
+	if config["dns"].(map[string]any)["enable"] != false {
+		t.Fatal("Mihomo DNS should be disabled")
+	}
+	if config["rules"].([]any)[0] != "MATCH,DIRECT" {
+		t.Fatalf("rules: %#v", config["rules"])
+	}
+	_, fallback, err := applyDeviceProxyConfig(base, "Missing")
+	if err != nil || fallback != "First" {
+		t.Fatalf("fallback=%q err=%v", fallback, err)
 	}
 }
 

@@ -90,8 +90,8 @@ nslookup example.com 10.0.0.1
 
 部署时从 [Mihomo 官方发行版](https://github.com/MetaCubeX/mihomo/releases)选择匹配架构的二进制，安装为 `/usr/local/bin/mihomo`，将 [`deploy/mihomo.yaml`](deploy/mihomo.yaml) 复制到 `/var/lib/lighten012-pilot/mihomo.yaml`，将 [`deploy/lighten012-mihomo.service`](deploy/lighten012-mihomo.service) 复制到 `/etc/systemd/system/`，然后执行 `systemctl daemon-reload && systemctl enable --now lighten012-mihomo`。当前 Debian x86-64 虚拟机使用 v1.19.31 的 `linux-amd64-v1` 发行包，已按 GitHub SHA-256 校验。
 
-网页只需输入 HTTP(S) 订阅链接。Pilot 下载最多 1 MiB 的 Mihomo/Clash YAML，生成 Pilot 使用的本机 DNS、透明代理和控制端口配置，再调用 `mihomo -t` 校验、应用并重载；失败会恢复旧配置。订阅链接保存在配置旁的 `.subscription` 文件中，权限为 `0600`，页面只显示域名，之后可点“更新订阅”重新拉取。当前不支持只返回 Base64 节点列表的订阅。导入后，代理组与节点会出现在页面上。
+网页只需输入 HTTP(S) 订阅链接。Pilot 下载最多 1 MiB 的 Mihomo/Clash YAML，生成 Pilot 使用的设备代理入口和本机控制端口配置，再调用 `mihomo -t` 校验、应用并重载；失败会恢复旧配置。订阅链接保存在配置旁的 `.subscription` 文件中，权限为 `0600`，页面只显示域名，之后可点“更新订阅”重新拉取。当前不支持只返回 Base64 节点列表的订阅。导入后，代理组与节点会出现在页面上。
 
-全局域名白名单只接受域名，例如 `google.com`，并匹配其子域名；不能按 HTTPS URL 路径分流。白名单保存在 `/var/lib/lighten012-pilot/mihomo.yaml.whitelist.json`。LAN 设备仍向 Pilot 的 53 端口查询 DNS；Pilot 将白名单域名转给 Mihomo 在 `127.0.0.1:1053` 的 DNS，其他域名继续用本地记录或 Pilot 上游 DNS。Mihomo 对白名单域名返回 fake-IP，Pilot 把应答中的 A 地址放入带 TTL 的 `PILOT_PROXY_IPS` ipset；来自 LAN、目标命中该集合的 TCP 连接由专用 `PILOT_PROXY` iptables 链转到 Mihomo 的 7893 端口，UDP 连接经 TProxy 7896 入口交给 Mihomo，其余流量照常由 Pilot 转发。Mihomo 使用独立的节点引导 DNS，避免查询循环。订阅更新后会重新生成这些规则，不采用订阅自带的分流规则。运行环境需要 `ipset` 和内核的 REDIRECT/TProxy 支持。当前仅支持 IPv4；白名单模式的客户端必须使用 Pilot DNS，其他 DNS、缓存或直接连 IP 的连接可能绕过白名单。
+LAN 设备列表可按 MAC 地址切换代理。开启后，该设备的公网 TCP 连接重定向到 Mihomo 的 7894 入口，UDP 连接经 TProxy 7895 入口，均使用 Mihomo 页面选择的代理组；关闭后由 Pilot 直接转发。LAN 私有地址保持直连。设备开关和代理组保存在 `/var/lib/lighten012-pilot/device-proxy.json`，DHCP 重新分配 IP 后仍生效。UDP TProxy 使用 fwmark `0x102` 和路由表 `102`。Pilot 仍是设备网关，并为 LAN 提供本地记录与上游 DNS 解析。
 
-LAN 设备列表还可按 MAC 地址切换“全部经 Mihomo”。开启后，该设备的公网 TCP 连接重定向到 Mihomo 的 7894 入口，UDP 连接经 TProxy 7895 入口，均直接使用白名单页面选择的代理组，不再检查域名白名单；关闭后回到原有白名单分流。设置保存在 `/var/lib/lighten012-pilot/mihomo.yaml.whitelist.json.devices.json`，DHCP 重新分配 IP 后仍生效。LAN 私有地址保持直连。UDP TProxy 使用 fwmark `0x102` 和路由表 `102`；Pilot 仍是设备网关，本地 DNS 查询仍由 Pilot 处理。
+从旧版升级时，若新配置文件尚不存在，Pilot 会读取旧白名单配置中的代理组及设备开关状态，写入新文件；旧域名列表不再生效。订阅更新会保留所选代理组，并重新生成 Pilot 专用的 TCP/UDP 入口。运行环境需要内核 REDIRECT/TProxy 支持，当前仅支持 IPv4。

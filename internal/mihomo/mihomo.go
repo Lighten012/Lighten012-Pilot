@@ -31,14 +31,14 @@ type mihomoClient struct {
 	configPath string
 	client     *http.Client
 	mu         sync.Mutex
-	whitelist  *network.ProxyWhitelist
+	proxy      *network.DeviceProxy
 }
 
 type Client = mihomoClient
 
-func NewClient(configPath string) *Client                              { return newMihomoClient(configPath) }
-func (m *mihomoClient) SetWhitelist(whitelist *network.ProxyWhitelist) { m.whitelist = whitelist }
-func (m *mihomoClient) Routes(mux *http.ServeMux)                      { m.routes(mux) }
+func NewClient(configPath string) *Client                         { return newMihomoClient(configPath) }
+func (m *mihomoClient) SetDeviceProxy(proxy *network.DeviceProxy) { m.proxy = proxy }
+func (m *mihomoClient) Routes(mux *http.ServeMux)                 { m.routes(mux) }
 
 type mihomoGroup struct {
 	Name    string   `json:"name"`
@@ -287,14 +287,20 @@ func (m *mihomoClient) applySubscription(ctx context.Context, rawURL string) err
 	if err != nil {
 		return err
 	}
-	if m.whitelist != nil {
-		config, err = network.ApplyWhitelistRules(config, m.whitelist.Get())
+	selectedGroup := ""
+	if m.proxy != nil {
+		config, selectedGroup, err = applyDeviceProxyConfig(config, m.proxy.Group())
 		if err != nil {
 			return err
 		}
 	}
 	if err := m.importConfig(ctx, config); err != nil {
 		return err
+	}
+	if m.proxy != nil && selectedGroup != m.proxy.Group() {
+		if err := m.proxy.SetGroup(selectedGroup); err != nil {
+			return err
+		}
 	}
 	path := m.subscriptionPath()
 	temp, err := os.CreateTemp(filepath.Dir(path), "mihomo-subscription-*")
@@ -374,59 +380,49 @@ func validateMihomoConfig(content []byte) error {
 		return errors.New("控制接口必须是 127.0.0.1:9090")
 	}
 	if secret, exists := config["secret"]; exists && secret != "" && secret != nil {
-		return errors.New("此版由 Pilot 在本机访问控制接口，请不要设置 Mihomo API 密钥")
-	}
-	if listeners, exists := config["listeners"]; exists {
-		items, ok := listeners.([]any)
-		if !ok || len(items) != 3 {
-			return errors.New("仅允许 Pilot 的全设备透明入口")
-		}
-		for i, expected := range []struct {
-			name, typ    string
-			port, fields int
-			udp          bool
-		}{
-			{"pilot-full-device", "redir", 7894, 5, false},
-			{"pilot-full-device-udp", "tproxy", 7895, 6, true},
-			{"pilot-whitelist-udp", "tproxy", 7896, 5, true},
-		} {
-			item, ok := items[i].(map[string]any)
-			if !ok || len(item) != expected.fields || item["name"] != expected.name || item["type"] != expected.typ || item["port"] != expected.port || item["listen"] != "0.0.0.0" {
-				return errors.New("无效的 Pilot 透明入口")
-			}
-			if expected.udp && item["udp"] != true {
-				return errors.New("UDP 透明入口未启用")
-			}
-			if i < 2 {
-				group, ok := item["proxy"].(string)
-				if !ok || group == "" {
-					return errors.New("全设备透明入口需要代理组")
-				}
-				if i == 1 && group != items[0].(map[string]any)["proxy"] {
-					return errors.New("全设备 TCP/UDP 代理组不一致")
-				}
-			}
-		}
-	}
-	if config["allow-lan"] == true && (config["redir-port"] != 7893 || config["mixed-port"] != 0) {
-		return errors.New("仅允许 LAN 使用透明代理端口，普通代理端口须关闭")
+		return errors.New("Pilot 本机控制接口不使用密钥")
 	}
 	if tun, ok := config["tun"].(map[string]any); ok && tun["enable"] == true {
-		return errors.New("此版暂不支持 TUN 透明代理")
+		return errors.New("不支持 TUN")
 	}
-	if dns, ok := config["dns"].(map[string]any); ok && dns["enable"] == true && (dns["listen"] != "127.0.0.1:1053" || dns["enhanced-mode"] != "fake-ip") {
-		return errors.New("Mihomo DNS 只能监听本机 127.0.0.1:1053，并使用 fake-ip 模式")
+	if dns, ok := config["dns"].(map[string]any); ok && dns["enable"] == true {
+		return errors.New("Mihomo DNS 必须关闭；由 Pilot 提供 DNS")
 	}
-	if port, exists := config["redir-port"]; exists && port != 7893 {
-		return errors.New("透明代理端口必须是 7893")
-	}
-	for _, key := range []string{"tproxy-port"} {
-		if port, ok := config[key].(int); ok && port != 0 {
-			return fmt.Errorf("此版不启用 %s", key)
+	for _, key := range []string{"mixed-port", "redir-port", "tproxy-port", "socks-port", "port"} {
+		if value, ok := config[key].(int); ok && value != 0 {
+			return fmt.Errorf("%s 必须关闭", key)
 		}
 	}
-	if config["redir-port"] == 7893 && config["bind-address"] != "*" {
-		return errors.New("透明代理需监听 LAN 地址")
+	listeners, exists := config["listeners"]
+	if !exists {
+		return nil
+	} // bootstrap config before importing a subscription
+	items, ok := listeners.([]any)
+	if !ok || len(items) != 2 {
+		return errors.New("只允许 Pilot 的 TCP/UDP 透明入口")
+	}
+	expected := []struct {
+		name, typ    string
+		port, fields int
+	}{{"pilot-full-device", "redir", 7894, 5}, {"pilot-full-device-udp", "tproxy", 7895, 6}}
+	group := ""
+	for i, want := range expected {
+		item, ok := items[i].(map[string]any)
+		if !ok || len(item) != want.fields || item["name"] != want.name || item["type"] != want.typ || item["port"] != want.port || item["listen"] != "0.0.0.0" {
+			return errors.New("无效的 Pilot 透明入口")
+		}
+		current, ok := item["proxy"].(string)
+		if !ok || current == "" {
+			return errors.New("透明入口需要代理组")
+		}
+		if i == 0 {
+			group = current
+		} else if group != current || item["udp"] != true {
+			return errors.New("TCP/UDP 入口代理组不一致或 UDP 未启用")
+		}
+	}
+	if config["allow-lan"] != true || config["bind-address"] != "*" {
+		return errors.New("透明入口必须监听 LAN")
 	}
 	return nil
 }
@@ -483,12 +479,10 @@ func (m *mihomoClient) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/mihomo", func(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteJSON(w, http.StatusOK, m.state(r.Context()))
 	})
-	if m.whitelist != nil {
-		mux.HandleFunc("GET /api/mihomo/whitelist", func(w http.ResponseWriter, r *http.Request) {
-			httpx.WriteJSON(w, http.StatusOK, m.whitelist.Get())
-		})
-		mux.HandleFunc("GET /api/mihomo/devices", func(w http.ResponseWriter, r *http.Request) {
-			httpx.WriteJSON(w, http.StatusOK, m.whitelist.Devices())
+	if m.proxy != nil {
+		mux.HandleFunc("GET /api/mihomo/devices", func(w http.ResponseWriter, r *http.Request) { httpx.WriteJSON(w, http.StatusOK, m.proxy.Devices()) })
+		mux.HandleFunc("GET /api/mihomo/proxy-group", func(w http.ResponseWriter, r *http.Request) {
+			httpx.WriteJSON(w, http.StatusOK, map[string]string{"group": m.proxy.Group()})
 		})
 	}
 	mutate := func(w http.ResponseWriter, r *http.Request) bool {
@@ -498,7 +492,7 @@ func (m *mihomoClient) routes(mux *http.ServeMux) {
 		http.Error(w, "请求来源无效", http.StatusForbidden)
 		return false
 	}
-	if m.whitelist != nil {
+	if m.proxy != nil {
 		mux.HandleFunc("PUT /api/mihomo/devices/{mac}", func(w http.ResponseWriter, r *http.Request) {
 			if !mutate(w, r) {
 				return
@@ -510,32 +504,21 @@ func (m *mihomoClient) routes(mux *http.ServeMux) {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			if input.Full && m.whitelist.Get().Group == "" {
-				http.Error(w, "请先选择代理组并保存白名单", http.StatusBadRequest)
-				return
-			}
-			if err := m.whitelist.SetDevice(r.PathValue("mac"), input.Full); err != nil {
+			if err := m.proxy.SetDevice(r.PathValue("mac"), input.Full); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			httpx.WriteJSON(w, http.StatusOK, m.whitelist.Devices())
+			httpx.WriteJSON(w, http.StatusOK, m.proxy.Devices())
 		})
-		mux.HandleFunc("PUT /api/mihomo/whitelist", func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc("PUT /api/mihomo/proxy-group", func(w http.ResponseWriter, r *http.Request) {
 			if !mutate(w, r) {
 				return
 			}
-			var input network.ProxyWhitelistConfig
+			var input struct {
+				Group string `json:"group"`
+			}
 			if err := httpx.DecodeRequest(w, r, &input); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			config, err := network.NormalizeProxyWhitelist(input)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			if config.Group == "" && len(m.whitelist.Devices()) > 0 {
-				http.Error(w, "启用全部经 Mihomo 的设备需要代理组", http.StatusBadRequest)
 				return
 			}
 			current, err := os.ReadFile(m.configPath)
@@ -543,20 +526,20 @@ func (m *mihomoClient) routes(mux *http.ServeMux) {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			updated, err := network.ApplyWhitelistRules(current, config)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
+			updated, selected, err := applyDeviceProxyConfig(current, input.Group)
+			if err != nil || selected != input.Group {
+				http.Error(w, "请选择有效的代理组", http.StatusBadRequest)
 				return
 			}
 			if err := m.importConfig(r.Context(), updated); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			if err := m.whitelist.Update(config); err != nil {
+			if err := m.proxy.SetGroup(selected); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			httpx.WriteJSON(w, http.StatusOK, config)
+			httpx.WriteJSON(w, http.StatusOK, map[string]string{"group": selected})
 		})
 	}
 	mux.HandleFunc("PUT /api/mihomo/group", func(w http.ResponseWriter, r *http.Request) {
