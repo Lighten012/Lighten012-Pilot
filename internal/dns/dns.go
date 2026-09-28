@@ -1,4 +1,4 @@
-package main
+package dnsservice
 
 import (
 	"context"
@@ -20,17 +20,37 @@ type Stats struct {
 	Failed    uint64 `json:"failed"`
 }
 
+// Proxy handles domains selected for Mihomo DNS and observes returned addresses.
+type Proxy interface {
+	Contains(string) bool
+	ObserveDNS(string, *dns.Msg)
+}
+
 type Resolver struct {
 	mu                                        sync.RWMutex
 	config                                    Config
 	records                                   map[string][]dns.RR
 	macRecords                                map[string]Record
 	ipForMAC                                  func(string) (netip.Addr, bool)
-	proxy                                     *proxyWhitelist
+	proxy                                     Proxy
 	mihomoDNSAddr                             string
 	exchange                                  func(context.Context, *dns.Msg, string, string) (*dns.Msg, error)
 	slots                                     chan struct{}
 	queries, local, forwarded, mihomo, failed atomic.Uint64
+}
+
+func NewResolver(c Config) *Resolver   { return newResolver(c) }
+func (r *Resolver) SetConfig(c Config) { r.setConfig(c) }
+func (r *Resolver) GetConfig() Config  { return r.getConfig() }
+func (r *Resolver) Stats() Stats       { return r.stats() }
+func (r *Resolver) Resolve(ctx context.Context, q *dns.Msg, transport string) *dns.Msg {
+	return r.resolve(ctx, q, transport)
+}
+func (r *Resolver) SetProxy(proxy Proxy)                           { r.proxy = proxy }
+func (r *Resolver) SetIPForMAC(fn func(string) (netip.Addr, bool)) { r.ipForMAC = fn }
+func (r *Resolver) SetMihomoDNSAddr(address string)                { r.mihomoDNSAddr = address }
+func (r *Resolver) SetExchange(fn func(context.Context, *dns.Msg, string, string) (*dns.Msg, error)) {
+	r.exchange = fn
 }
 
 func newResolver(c Config) *Resolver {
@@ -94,7 +114,7 @@ func (r *Resolver) resolve(ctx context.Context, q *dns.Msg, transport string) *d
 	upstream := r.config.Upstream
 	backupUpstream := r.config.BackupUpstream
 	r.mu.RUnlock()
-	mihomoQuery := r.proxy != nil && r.proxy.contains(name)
+	mihomoQuery := r.proxy != nil && r.proxy.Contains(name)
 	if mihomoQuery {
 		found = false
 	}
@@ -189,7 +209,7 @@ func (r *Resolver) serveDNS(w dns.ResponseWriter, q *dns.Msg, allowed netip.Pref
 	}
 	answer := r.resolve(context.Background(), q, transport)
 	if r.proxy != nil && len(q.Question) == 1 {
-		r.proxy.observeDNS(strings.TrimSuffix(strings.ToLower(q.Question[0].Name), "."), answer)
+		r.proxy.ObserveDNS(strings.TrimSuffix(strings.ToLower(q.Question[0].Name), "."), answer)
 	}
 	if transport == "udp" {
 		size := 512

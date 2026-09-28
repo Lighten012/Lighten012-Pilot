@@ -1,6 +1,6 @@
 //go:build linux
 
-package main
+package dhcp
 
 import (
 	"fmt"
@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	dnsservice "github.com/Lighten012/Lighten012-Pilot/internal/dns"
 )
 
 func TestDHCPWire(t *testing.T) {
@@ -60,17 +62,17 @@ func TestDHCPWire(t *testing.T) {
 
 	// The DHCP client represents server B. A second source address represents
 	// client A, which must receive B's current address.
-	r := newResolver(Config{Upstream: "119.29.29.29", Records: []Record{
+	r := dnsservice.NewResolver(dnsservice.Config{Upstream: "119.29.29.29", Records: []dnsservice.Record{
 		{Name: "pilot.home", Type: "A", TTL: 60, MAC: leasesMAC(leases)},
 	}})
-	r.ipForMAC = service.ipForMAC
-	dnsServer := newDNSService(r, 15353)
-	defer dnsServer.close()
-	dnsChange, err := dnsServer.stage(netip.MustParsePrefix("10.245.1.1/24"))
+	r.SetIPForMAC(service.IPForMAC)
+	dnsServer := dnsservice.NewService(r, 15353)
+	defer dnsServer.Close()
+	dnsChange, err := dnsServer.Stage(netip.MustParsePrefix("10.245.1.1/24"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	dnsChange.commit()
+	dnsChange.Commit()
 	if output, err := exec.Command("ip", "netns", "exec", namespace, "ip", "addr", "add", "10.245.1.100/24", "dev", "pilodc0").CombinedOutput(); err != nil {
 		t.Fatalf("configure DHCP client address: %v %s", err, output)
 	}

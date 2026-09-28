@@ -1,4 +1,4 @@
-package main
+package dnsservice
 
 import (
 	"fmt"
@@ -32,6 +32,15 @@ type dnsChange struct {
 	pair    *dnsPair
 	noop    bool
 }
+
+type Service = dnsService
+type Change = dnsChange
+
+func NewService(resolver *Resolver, port int) *Service        { return newDNSService(resolver, port) }
+func (s *dnsService) Stage(lan netip.Prefix) (*Change, error) { return s.stage(lan) }
+func (c *dnsChange) Commit()                                  { c.commit() }
+func (c *dnsChange) Abort()                                   { c.abort() }
+func (s *dnsService) Close()                                  { s.close() }
 
 type lanDNSHandler struct {
 	resolver *Resolver

@@ -1,4 +1,4 @@
-package main
+package network
 
 import (
 	"net/netip"
@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Lighten012/Lighten012-Pilot/internal/storage"
 )
 
 func TestLANAddressValidation(t *testing.T) {
@@ -39,7 +41,7 @@ func TestLANFileMustMatchRunningAddress(t *testing.T) {
 		t.Fatal("mismatched live address was accepted")
 	}
 	replacement := strings.Replace(string(content), "192.168.60.1/24", "192.168.70.1/24", 1)
-	if err := writeAtomic(path, []byte(replacement), 0644); err != nil {
+	if err := storage.WriteAtomic(path, []byte(replacement), 0644); err != nil {
 		t.Fatal(err)
 	}
 	actual, err := os.ReadFile(path)

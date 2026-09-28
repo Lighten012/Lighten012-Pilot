@@ -1,9 +1,10 @@
-package main
+package network
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/Lighten012/Lighten012-Pilot/internal/dhcp"
 	"net"
 	"net/netip"
 	"os/exec"
@@ -20,6 +21,10 @@ type lanDevice struct {
 	State string `json:"state"`
 }
 
+type Device = lanDevice
+
+func (m *networkManager) LANDevices() ([]Device, error) { return m.lanDevices() }
+
 type arpProbe struct {
 	MAC string
 	Err error
@@ -34,11 +39,11 @@ func (m *networkManager) lanDevices() ([]lanDevice, error) {
 		return []lanDevice{}, nil
 	}
 	lan := m.roles.LAN
-	dhcp := m.dhcp
+	dhcpService := m.dhcp
 	m.mu.Unlock()
-	var leases []dhcpLease
-	if dhcp != nil {
-		leases = dhcp.currentLeases()
+	var leases []dhcp.Lease
+	if dhcpService != nil {
+		leases = dhcpService.CurrentLeases()
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -80,7 +85,7 @@ func (m *networkManager) lanDevices() ([]lanDevice, error) {
 	return classifyLANDevices(candidates, results), nil
 }
 
-func lanDeviceCandidates(leases []dhcpLease, neighbors []lanDevice) []lanDevice {
+func lanDeviceCandidates(leases []dhcp.Lease, neighbors []lanDevice) []lanDevice {
 	byIP := make(map[string]lanDevice)
 	leasedMACs := make(map[string]string)
 	for _, lease := range leases {

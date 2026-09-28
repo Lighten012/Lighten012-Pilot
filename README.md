@@ -4,6 +4,10 @@
 
 服务是一个 Go 程序，网页已经嵌入二进制文件。**可以在本机编译，服务器只运行编译结果**，无需安装 Go、Node.js 或放置源代码。
 
+## 代码结构
+
+根目录的 `main.go` 只嵌入网页并启动服务。`internal/pilot` 组装各模块、处理 Web API 和服务生命周期；`internal/dns` 管理解析记录、上游查询与 LAN DNS 监听；`internal/dhcp` 管理地址池、租约和 DHCP 协议；`internal/network` 管理网卡、LAN 地址、设备探测、转发与代理规则；`internal/mihomo` 管理订阅和 Mihomo 控制接口。`internal/httpx` 与 `internal/storage` 放置共用的 HTTP 和文件写入工具。网页资源在 `web/`，部署单元在 `deploy/`。
+
 ## 本机编译
 
 需要 Go 1.24 或更新版本。先运行测试：

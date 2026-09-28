@@ -1,4 +1,4 @@
-package main
+package network
 
 import "net"
 
@@ -11,6 +11,10 @@ type interfaceInfo struct {
 	Loopback  bool     `json:"loopback"`
 	Addresses []string `json:"addresses"`
 }
+
+type InterfaceInfo = interfaceInfo
+
+func ListInterfaces() ([]InterfaceInfo, error) { return listInterfaces() }
 
 func listInterfaces() ([]interfaceInfo, error) {
 	interfaces, err := net.Interfaces()

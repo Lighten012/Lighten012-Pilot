@@ -1,11 +1,10 @@
-package main
+package dnsservice
 
 import (
 	"context"
 	"net/netip"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/miekg/dns"
 )
@@ -25,13 +24,12 @@ func TestMACBoundNameFollowsTargetDHCPLease(t *testing.T) {
 	if err != nil || len(config.Records) != 1 || config.Records[0].Value != "" {
 		t.Fatalf("reload MAC binding: %+v %v", config, err)
 	}
-	pool, _ := makeDHCPConfig(netip.MustParsePrefix("10.0.0.1/24"))
-	server := &dhcpServer{config: pool, leases: map[string]dhcpLease{
-		"aa:bb:cc:dd:ee:01": {MAC: "aa:bb:cc:dd:ee:01", IP: "10.0.0.100", Expires: time.Now().Add(time.Hour).Unix()},
-	}}
-	service := &dhcpService{active: server}
+	address := netip.MustParseAddr("10.0.0.100")
+	valid := true
 	r := newResolver(config)
-	r.ipForMAC = service.ipForMAC
+	r.ipForMAC = func(mac string) (netip.Addr, bool) {
+		return address, valid && mac == "aa:bb:cc:dd:ee:01"
+	}
 	query := new(dns.Msg)
 	query.SetQuestion("pilot.home.", dns.TypeA)
 	check := func(expected string) {
@@ -42,13 +40,9 @@ func TestMACBoundNameFollowsTargetDHCPLease(t *testing.T) {
 		}
 	}
 	check("10.0.0.100")
-	server.mu.Lock()
-	server.leases["aa:bb:cc:dd:ee:01"] = dhcpLease{MAC: "aa:bb:cc:dd:ee:01", IP: "10.0.0.102", Expires: time.Now().Add(time.Hour).Unix()}
-	server.mu.Unlock()
+	address = netip.MustParseAddr("10.0.0.102")
 	check("10.0.0.102")
-	server.mu.Lock()
-	server.leases["aa:bb:cc:dd:ee:01"] = dhcpLease{MAC: "aa:bb:cc:dd:ee:01", IP: "10.0.0.102", Expires: time.Now().Add(-time.Second).Unix()}
-	server.mu.Unlock()
+	valid = false
 	if got := r.resolve(context.Background(), query, "udp"); got.Rcode != dns.RcodeServerFailure || len(got.Answer) != 0 {
 		t.Fatalf("expired target lease should fail: %+v", got)
 	}

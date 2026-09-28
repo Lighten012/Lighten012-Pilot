@@ -1,4 +1,4 @@
-package main
+package dhcp
 
 import (
 	"encoding/binary"
@@ -12,6 +12,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/Lighten012/Lighten012-Pilot/internal/storage"
 )
 
 const dhcpLeaseTime = 12 * time.Hour
@@ -60,6 +62,35 @@ type dhcpChange struct {
 	server  *dhcpServer
 	config  dhcpConfig
 	fresh   bool
+}
+
+// Service owns DHCP leases and the listener on the selected LAN interface.
+type Service = dhcpService
+
+// Change stages a listener or subnet update until the network change commits.
+type Change = dhcpChange
+
+// Lease is a persistent MAC-to-address allocation.
+type Lease = dhcpLease
+
+func NewService(path string, port int) *Service { return newDHCPService(path, port) }
+
+func (s *dhcpService) Stage(iface string, lan netip.Prefix) (*Change, error) {
+	return s.stage(iface, lan)
+}
+
+func (c *dhcpChange) Commit()                                 { c.commit() }
+func (c *dhcpChange) Abort()                                  { c.abort() }
+func (s *dhcpService) Close()                                 { s.close() }
+func (s *dhcpService) IPForMAC(mac string) (netip.Addr, bool) { return s.ipForMAC(mac) }
+func (s *dhcpService) CurrentLeases() []Lease                 { return s.currentLeases() }
+
+func PoolRange(lan netip.Prefix) (string, error) {
+	pool, err := makeDHCPConfig(lan)
+	if err != nil {
+		return "", err
+	}
+	return dhcpAddr(pool.Start).String() + "–" + dhcpAddr(pool.End).String(), nil
 }
 
 func newDHCPService(path string, port int) *dhcpService {
@@ -145,7 +176,7 @@ func (s *dhcpServer) saveLeases(leases map[string]dhcpLease) error {
 	if err != nil {
 		return err
 	}
-	return writeAtomic(s.path, append(data, '\n'), 0600)
+	return storage.WriteAtomic(s.path, append(data, '\n'), 0600)
 }
 
 func (s *dhcpService) stage(iface string, lan netip.Prefix) (*dhcpChange, error) {

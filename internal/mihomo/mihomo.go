@@ -1,4 +1,4 @@
-package main
+package mihomo
 
 import (
 	"bufio"
@@ -20,6 +20,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Lighten012/Lighten012-Pilot/internal/httpx"
+	"github.com/Lighten012/Lighten012-Pilot/internal/network"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -28,8 +31,14 @@ type mihomoClient struct {
 	configPath string
 	client     *http.Client
 	mu         sync.Mutex
-	whitelist  *proxyWhitelist
+	whitelist  *network.ProxyWhitelist
 }
+
+type Client = mihomoClient
+
+func NewClient(configPath string) *Client                              { return newMihomoClient(configPath) }
+func (m *mihomoClient) SetWhitelist(whitelist *network.ProxyWhitelist) { m.whitelist = whitelist }
+func (m *mihomoClient) Routes(mux *http.ServeMux)                      { m.routes(mux) }
 
 type mihomoGroup struct {
 	Name    string   `json:"name"`
@@ -279,7 +288,7 @@ func (m *mihomoClient) applySubscription(ctx context.Context, rawURL string) err
 		return err
 	}
 	if m.whitelist != nil {
-		config, err = applyWhitelistRules(config, m.whitelist.get())
+		config, err = network.ApplyWhitelistRules(config, m.whitelist.Get())
 		if err != nil {
 			return err
 		}
@@ -472,18 +481,18 @@ func (m *mihomoClient) importConfig(ctx context.Context, content []byte) error {
 
 func (m *mihomoClient) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/mihomo", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, m.state(r.Context()))
+		httpx.WriteJSON(w, http.StatusOK, m.state(r.Context()))
 	})
 	if m.whitelist != nil {
 		mux.HandleFunc("GET /api/mihomo/whitelist", func(w http.ResponseWriter, r *http.Request) {
-			writeJSON(w, http.StatusOK, m.whitelist.get())
+			httpx.WriteJSON(w, http.StatusOK, m.whitelist.Get())
 		})
 		mux.HandleFunc("GET /api/mihomo/devices", func(w http.ResponseWriter, r *http.Request) {
-			writeJSON(w, http.StatusOK, m.whitelist.devices())
+			httpx.WriteJSON(w, http.StatusOK, m.whitelist.Devices())
 		})
 	}
 	mutate := func(w http.ResponseWriter, r *http.Request) bool {
-		if r.Header.Get("X-Pilot-Request") == "1" && sameOrigin(r) {
+		if r.Header.Get("X-Pilot-Request") == "1" && httpx.SameOrigin(r) {
 			return true
 		}
 		http.Error(w, "请求来源无效", http.StatusForbidden)
@@ -497,35 +506,35 @@ func (m *mihomoClient) routes(mux *http.ServeMux) {
 			var input struct {
 				Full bool `json:"full"`
 			}
-			if err := decodeRequest(w, r, &input); err != nil {
+			if err := httpx.DecodeRequest(w, r, &input); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			if input.Full && m.whitelist.get().Group == "" {
+			if input.Full && m.whitelist.Get().Group == "" {
 				http.Error(w, "请先选择代理组并保存白名单", http.StatusBadRequest)
 				return
 			}
-			if err := m.whitelist.setDevice(r.PathValue("mac"), input.Full); err != nil {
+			if err := m.whitelist.SetDevice(r.PathValue("mac"), input.Full); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			writeJSON(w, http.StatusOK, m.whitelist.devices())
+			httpx.WriteJSON(w, http.StatusOK, m.whitelist.Devices())
 		})
 		mux.HandleFunc("PUT /api/mihomo/whitelist", func(w http.ResponseWriter, r *http.Request) {
 			if !mutate(w, r) {
 				return
 			}
-			var input proxyWhitelistConfig
-			if err := decodeRequest(w, r, &input); err != nil {
+			var input network.ProxyWhitelistConfig
+			if err := httpx.DecodeRequest(w, r, &input); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			config, err := normalizeProxyWhitelist(input)
+			config, err := network.NormalizeProxyWhitelist(input)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			if config.Group == "" && len(m.whitelist.devices()) > 0 {
+			if config.Group == "" && len(m.whitelist.Devices()) > 0 {
 				http.Error(w, "启用全部经 Mihomo 的设备需要代理组", http.StatusBadRequest)
 				return
 			}
@@ -534,7 +543,7 @@ func (m *mihomoClient) routes(mux *http.ServeMux) {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			updated, err := applyWhitelistRules(current, config)
+			updated, err := network.ApplyWhitelistRules(current, config)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
@@ -543,11 +552,11 @@ func (m *mihomoClient) routes(mux *http.ServeMux) {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			if err := m.whitelist.update(config); err != nil {
+			if err := m.whitelist.Update(config); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			writeJSON(w, http.StatusOK, config)
+			httpx.WriteJSON(w, http.StatusOK, config)
 		})
 	}
 	mux.HandleFunc("PUT /api/mihomo/group", func(w http.ResponseWriter, r *http.Request) {
@@ -558,7 +567,7 @@ func (m *mihomoClient) routes(mux *http.ServeMux) {
 			Group string `json:"group"`
 			Name  string `json:"name"`
 		}
-		if err := decodeRequest(w, r, &input); err != nil {
+		if err := httpx.DecodeRequest(w, r, &input); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -566,7 +575,7 @@ func (m *mihomoClient) routes(mux *http.ServeMux) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+		httpx.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	})
 	mux.HandleFunc("POST /api/mihomo/reload", func(w http.ResponseWriter, r *http.Request) {
 		if !mutate(w, r) {
@@ -576,7 +585,7 @@ func (m *mihomoClient) routes(mux *http.ServeMux) {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+		httpx.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	})
 	mux.HandleFunc("POST /api/mihomo/delay", func(w http.ResponseWriter, r *http.Request) {
 		if !mutate(w, r) {
@@ -585,7 +594,7 @@ func (m *mihomoClient) routes(mux *http.ServeMux) {
 		var input struct {
 			Name string `json:"name"`
 		}
-		if err := decodeRequest(w, r, &input); err != nil {
+		if err := httpx.DecodeRequest(w, r, &input); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -599,7 +608,7 @@ func (m *mihomoClient) routes(mux *http.ServeMux) {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]int{"delay": delay})
+		httpx.WriteJSON(w, http.StatusOK, map[string]int{"delay": delay})
 	})
 	mux.HandleFunc("POST /api/mihomo/subscription", func(w http.ResponseWriter, r *http.Request) {
 		if !mutate(w, r) {
@@ -621,7 +630,7 @@ func (m *mihomoClient) routes(mux *http.ServeMux) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+		httpx.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	})
 	mux.HandleFunc("POST /api/mihomo/subscription/refresh", func(w http.ResponseWriter, r *http.Request) {
 		if !mutate(w, r) {
@@ -636,6 +645,6 @@ func (m *mihomoClient) routes(mux *http.ServeMux) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+		httpx.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	})
 }

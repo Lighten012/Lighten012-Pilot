@@ -1,4 +1,4 @@
-package main
+package dnsservice
 
 import (
 	"encoding/json"
@@ -26,6 +26,11 @@ type Config struct {
 	BackupUpstream string   `json:"backupUpstream"`
 	Records        []Record `json:"records"`
 }
+
+func DefaultConfig() Config                  { return defaultConfig() }
+func Normalize(c Config) (Config, error)     { return normalize(c) }
+func LoadConfig(path string) (Config, error) { return loadConfig(path) }
+func SaveConfig(path string, c Config) error { return saveConfig(path, c) }
 
 func defaultConfig() Config { return Config{Upstream: "119.29.29.29", Records: []Record{}} }
 

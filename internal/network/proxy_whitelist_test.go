@@ -1,4 +1,4 @@
-package main
+package network
 
 import (
 	"context"
@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Lighten012/Lighten012-Pilot/internal/dns"
 	"github.com/miekg/dns"
+	"gopkg.in/yaml.v3"
 )
 
 func TestProxyWhitelistRulesUseDirectFallback(t *testing.T) {
@@ -29,7 +31,8 @@ func TestProxyWhitelistRulesUseDirectFallback(t *testing.T) {
 			t.Fatalf("missing %s", rule)
 		}
 	}
-	if err := validateMihomoConfig(result); err != nil {
+	var parsed map[string]any
+	if err := yaml.Unmarshal(result, &parsed); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(result), "pilot-full-device") || !strings.Contains(string(result), "port: 7894") {
@@ -87,16 +90,16 @@ func TestWhitelistDNSUsesMihomo(t *testing.T) {
 	})}
 	go func() { _ = server.ActivateAndServe() }()
 	defer server.Shutdown()
-	r := newResolver(Config{Upstream: "119.29.29.29", Records: []Record{{Name: "google.com", Type: "A", Value: "192.0.2.1", TTL: 60}}})
-	r.proxy = &proxyWhitelist{config: proxyWhitelistConfig{Domains: []string{"google.com"}}}
-	r.mihomoDNSAddr = conn.LocalAddr().String()
+	r := dnsservice.NewResolver(dnsservice.Config{Upstream: "119.29.29.29", Records: []dnsservice.Record{{Name: "google.com", Type: "A", Value: "192.0.2.1", TTL: 60}}})
+	r.SetProxy(&proxyWhitelist{config: proxyWhitelistConfig{Domains: []string{"google.com"}}})
+	r.SetMihomoDNSAddr(conn.LocalAddr().String())
 	query := new(dns.Msg)
 	query.SetQuestion("google.com.", dns.TypeA)
-	answer := r.resolve(context.Background(), query, "udp")
+	answer := r.Resolve(context.Background(), query, "udp")
 	if len(answer.Answer) != 1 || answer.Answer[0].(*dns.A).A.String() != "198.18.0.2" {
 		t.Fatalf("unexpected answer: %+v", answer)
 	}
-	if stats := r.stats(); stats.Mihomo != 1 || stats.Local != 0 {
+	if stats := r.Stats(); stats.Mihomo != 1 || stats.Local != 0 {
 		t.Fatalf("unexpected stats: %+v", stats)
 	}
 }

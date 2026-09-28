@@ -1,6 +1,9 @@
-package main
+package network
 
-import "testing"
+import (
+	"github.com/Lighten012/Lighten012-Pilot/internal/dhcp"
+	"testing"
+)
 
 func TestParseLANDevices(t *testing.T) {
 	data := []byte(`[
@@ -20,7 +23,7 @@ func TestParseLANDevices(t *testing.T) {
 }
 
 func TestLANDevicePresenceUsesCurrentLeaseMAC(t *testing.T) {
-	leases := []dhcpLease{{IP: "10.0.0.105", MAC: "bc:24:11:10:cd:c7"}, {IP: "10.0.0.106", MAC: "aa:bb:cc:dd:ee:06"}}
+	leases := []dhcp.Lease{{IP: "10.0.0.105", MAC: "bc:24:11:10:cd:c7"}, {IP: "10.0.0.106", MAC: "aa:bb:cc:dd:ee:06"}}
 	neighbors := []lanDevice{{IP: "10.0.0.2", MAC: "bc:24:11:10:cd:c7", State: "STALE"}, {IP: "10.0.0.105", MAC: "bc:24:11:ca:d6:60", State: "STALE"}}
 	devices := lanDeviceCandidates(leases, neighbors)
 	if len(devices) != 2 || devices[0].MAC != "bc:24:11:10:cd:c7" {

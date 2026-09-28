@@ -1,4 +1,4 @@
-package main
+package network
 
 import (
 	"context"
@@ -15,6 +15,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Lighten012/Lighten012-Pilot/internal/dhcp"
+	"github.com/Lighten012/Lighten012-Pilot/internal/dns"
+	"github.com/Lighten012/Lighten012-Pilot/internal/storage"
 )
 
 type networkRoles struct {
@@ -36,10 +40,34 @@ type networkManager struct {
 	interfacesDir string
 	webAddress    string
 	runIP         func(...string) error
-	dns           *dnsService
-	dhcp          *dhcpService
+	dns           *dnsservice.Service
+	dhcp          *dhcp.Service
 	forward       *forwarder
 }
+
+type Roles = networkRoles
+type State = networkState
+type Manager = networkManager
+
+func NewManager(path, interfacesDir, webAddress string) (*Manager, error) {
+	return newNetworkManager(path, interfacesDir, webAddress)
+}
+func (m *networkManager) Attach(dns *dnsservice.Service, dhcp *dhcp.Service, forward *Forwarder) {
+	m.dns, m.dhcp, m.forward = dns, dhcp, forward
+}
+func (m *networkManager) Roles() *Roles {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.roles == nil {
+		return nil
+	}
+	roles := *m.roles
+	return &roles
+}
+func (m *networkManager) State() (State, error)               { return m.state() }
+func (m *networkManager) SelectRoles(roles Roles) error       { return m.selectRoles(roles) }
+func (m *networkManager) ChangeLANAddress(value string) error { return m.changeLANAddress(value) }
+func CurrentIPv4(name string) (netip.Prefix, error)           { return currentIPv4(name) }
 
 var interfaceNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_.:-]+$`)
 
@@ -76,8 +104,8 @@ func (m *networkManager) state() (networkState, error) {
 		state.Roles = &roles
 		if lan, err := currentIPv4(m.roles.LAN); err == nil {
 			state.LANAddress = lan.String()
-			if pool, err := makeDHCPConfig(lan); err == nil {
-				state.DHCPRange = dhcpAddr(pool.Start).String() + "–" + dhcpAddr(pool.End).String()
+			if pool, err := dhcp.PoolRange(lan); err == nil {
+				state.DHCPRange = pool
 			}
 		}
 	}
@@ -112,19 +140,19 @@ func (m *networkManager) selectRoles(roles networkRoles) error {
 	if _, _, err := m.readLANFile(roles.LAN, lan); err != nil {
 		return err
 	}
-	var dnsChange *dnsChange
+	var dnsChange *dnsservice.Change
 	if m.dns != nil {
-		dnsChange, err = m.dns.stage(lan)
+		dnsChange, err = m.dns.Stage(lan)
 		if err != nil {
 			return err
 		}
 	}
-	var dhcpChange *dhcpChange
+	var dhcpChange *dhcp.Change
 	if m.dhcp != nil {
-		dhcpChange, err = m.dhcp.stage(roles.LAN, lan)
+		dhcpChange, err = m.dhcp.Stage(roles.LAN, lan)
 		if err != nil {
 			if dnsChange != nil {
-				dnsChange.abort()
+				dnsChange.Abort()
 			}
 			return err
 		}
@@ -133,10 +161,10 @@ func (m *networkManager) selectRoles(roles networkRoles) error {
 		if err := m.forward.apply(roles, lan); err != nil {
 			cleanupErr := m.forward.close()
 			if dhcpChange != nil {
-				dhcpChange.abort()
+				dhcpChange.Abort()
 			}
 			if dnsChange != nil {
-				dnsChange.abort()
+				dnsChange.Abort()
 			}
 			return errors.Join(err, cleanupErr)
 		}
@@ -148,32 +176,32 @@ func (m *networkManager) selectRoles(roles networkRoles) error {
 			cleanupErr = m.forward.close()
 		}
 		if dhcpChange != nil {
-			dhcpChange.abort()
+			dhcpChange.Abort()
 		}
 		if dnsChange != nil {
-			dnsChange.abort()
+			dnsChange.Abort()
 		}
 		return errors.Join(err, cleanupErr)
 	}
-	if err := writeAtomic(m.path, append(data, '\n'), 0600); err != nil {
+	if err := storage.WriteAtomic(m.path, append(data, '\n'), 0600); err != nil {
 		var cleanupErr error
 		if m.forward != nil {
 			cleanupErr = m.forward.close()
 		}
 		if dhcpChange != nil {
-			dhcpChange.abort()
+			dhcpChange.Abort()
 		}
 		if dnsChange != nil {
-			dnsChange.abort()
+			dnsChange.Abort()
 		}
 		return errors.Join(err, cleanupErr)
 	}
 	m.roles = &roles
 	if dnsChange != nil {
-		dnsChange.commit()
+		dnsChange.Commit()
 	}
 	if dhcpChange != nil {
-		dhcpChange.commit()
+		dhcpChange.Commit()
 	}
 	return nil
 }
@@ -220,20 +248,20 @@ func (m *networkManager) changeLANAddress(value string) error {
 	if err := m.runIP("-4", "address", "add", newAddress.String(), "dev", m.roles.LAN); err != nil {
 		return fmt.Errorf("添加新地址失败：%w", err)
 	}
-	var dnsChange *dnsChange
+	var dnsChange *dnsservice.Change
 	if m.dns != nil {
-		dnsChange, err = m.dns.stage(newAddress)
+		dnsChange, err = m.dns.Stage(newAddress)
 		if err != nil {
 			removeErr := m.runIP("-4", "address", "del", newAddress.String(), "dev", m.roles.LAN)
 			return errors.Join(err, removeErr)
 		}
 	}
-	var dhcpChange *dhcpChange
+	var dhcpChange *dhcp.Change
 	if m.dhcp != nil {
-		dhcpChange, err = m.dhcp.stage(m.roles.LAN, newAddress)
+		dhcpChange, err = m.dhcp.Stage(m.roles.LAN, newAddress)
 		if err != nil {
 			if dnsChange != nil {
-				dnsChange.abort()
+				dnsChange.Abort()
 			}
 			removeErr := m.runIP("-4", "address", "del", newAddress.String(), "dev", m.roles.LAN)
 			return errors.Join(err, removeErr)
@@ -243,25 +271,25 @@ func (m *networkManager) changeLANAddress(value string) error {
 		if err := m.forward.apply(*m.roles, newAddress); err != nil {
 			restoreErr := m.forward.apply(*m.roles, oldAddress)
 			if dhcpChange != nil {
-				dhcpChange.abort()
+				dhcpChange.Abort()
 			}
 			if dnsChange != nil {
-				dnsChange.abort()
+				dnsChange.Abort()
 			}
 			removeErr := m.runIP("-4", "address", "del", newAddress.String(), "dev", m.roles.LAN)
 			return errors.Join(err, restoreErr, removeErr)
 		}
 	}
-	if err := writeAtomic(path, []byte(newFile), 0644); err != nil {
+	if err := storage.WriteAtomic(path, []byte(newFile), 0644); err != nil {
 		var restoreForwardErr error
 		if m.forward != nil {
 			restoreForwardErr = m.forward.apply(*m.roles, oldAddress)
 		}
 		if dnsChange != nil {
-			dnsChange.abort()
+			dnsChange.Abort()
 		}
 		if dhcpChange != nil {
-			dhcpChange.abort()
+			dhcpChange.Abort()
 		}
 		removeErr := m.runIP("-4", "address", "del", newAddress.String(), "dev", m.roles.LAN)
 		return errors.Join(fmt.Errorf("保存 LAN 地址失败：%w", err), restoreForwardErr, removeErr)
@@ -272,20 +300,20 @@ func (m *networkManager) changeLANAddress(value string) error {
 			restoreForwardErr = m.forward.apply(*m.roles, oldAddress)
 		}
 		if dnsChange != nil {
-			dnsChange.abort()
+			dnsChange.Abort()
 		}
 		if dhcpChange != nil {
-			dhcpChange.abort()
+			dhcpChange.Abort()
 		}
-		restoreErr := writeAtomic(path, oldFile, 0644)
+		restoreErr := storage.WriteAtomic(path, oldFile, 0644)
 		removeErr := m.runIP("-4", "address", "del", newAddress.String(), "dev", m.roles.LAN)
 		return errors.Join(fmt.Errorf("移除原地址失败：%w", err), restoreForwardErr, restoreErr, removeErr)
 	}
 	if dnsChange != nil {
-		dnsChange.commit()
+		dnsChange.Commit()
 	}
 	if dhcpChange != nil {
-		dhcpChange.commit()
+		dhcpChange.Commit()
 	}
 	return nil
 }
@@ -369,33 +397,6 @@ func (m *networkManager) readLANFile(name string, current netip.Prefix) (string,
 		return "", nil, errors.New("LAN 配置与当前地址不一致，暂不修改")
 	}
 	return path, data, nil
-}
-
-func writeAtomic(path string, data []byte, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		return err
-	}
-	file, err := os.CreateTemp(filepath.Dir(path), ".pilot-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(file.Name())
-	if err := file.Chmod(mode); err != nil {
-		file.Close()
-		return err
-	}
-	if _, err := file.Write(data); err != nil {
-		file.Close()
-		return err
-	}
-	if err := file.Sync(); err != nil {
-		file.Close()
-		return err
-	}
-	if err := file.Close(); err != nil {
-		return err
-	}
-	return os.Rename(file.Name(), path)
 }
 
 func runIPCommand(args ...string) error {

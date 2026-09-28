@@ -1,4 +1,4 @@
-package main
+package network
 
 import (
 	"context"
@@ -48,6 +48,24 @@ type proxyWhitelist struct {
 	iptRun      func(...string) error
 	ipRun       func(...string) error
 }
+
+type ProxyWhitelist = proxyWhitelist
+type ProxyWhitelistConfig = proxyWhitelistConfig
+
+func NewProxyWhitelist(path string) (*ProxyWhitelist, error) { return newProxyWhitelist(path) }
+func NormalizeProxyWhitelist(input ProxyWhitelistConfig) (ProxyWhitelistConfig, error) {
+	return normalizeProxyWhitelist(input)
+}
+func ApplyWhitelistRules(content []byte, config ProxyWhitelistConfig) ([]byte, error) {
+	return applyWhitelistRules(content, config)
+}
+func (p *proxyWhitelist) Devices() map[string]bool                 { return p.devices() }
+func (p *proxyWhitelist) SetDevice(mac string, enabled bool) error { return p.setDevice(mac, enabled) }
+func (p *proxyWhitelist) Get() ProxyWhitelistConfig                { return p.get() }
+func (p *proxyWhitelist) Update(config ProxyWhitelistConfig) error { return p.update(config) }
+
+func (p *proxyWhitelist) Contains(name string) bool               { return p.contains(name) }
+func (p *proxyWhitelist) ObserveDNS(name string, answer *dns.Msg) { p.observeDNS(name, answer) }
 
 func newProxyWhitelist(path string) (*proxyWhitelist, error) {
 	p := &proxyWhitelist{path: path, setRun: runIPSet, iptRun: runIPTables, ipRun: runIPCommand, fullDevices: map[string]bool{}}

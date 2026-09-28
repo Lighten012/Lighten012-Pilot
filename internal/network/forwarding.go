@@ -1,4 +1,4 @@
-package main
+package network
 
 import (
 	"context"
@@ -25,6 +25,13 @@ type forwarder struct {
 	active         bool
 	proxy          *proxyWhitelist
 }
+
+type Forwarder = forwarder
+
+func NewForwarder() (*Forwarder, error)                        { return newForwarder() }
+func (f *forwarder) SetProxy(proxy *ProxyWhitelist)            { f.proxy = proxy }
+func (f *forwarder) Apply(roles Roles, lan netip.Prefix) error { return f.apply(roles, lan) }
+func (f *forwarder) Close() error                              { return f.close() }
 
 func newForwarder() (*forwarder, error) {
 	value, err := os.ReadFile("/proc/sys/net/ipv4/ip_forward")

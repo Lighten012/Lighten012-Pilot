@@ -1,4 +1,4 @@
-package main
+package mihomo
 
 import (
 	"context"
