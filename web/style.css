@@ -91,10 +91,14 @@ textarea:focus { border-color: #84bd96; box-shadow: 0 0 0 3px #74b89524; outline
 .interface-addresses { display: flex; flex-wrap: wrap; gap: 6px; }
 .interface-addresses code, .dns-hint code { color: #4b795d; background: #eaf3eb; border-radius: 5px; padding: 4px 6px; font-size: 11px; overflow-wrap: anywhere; }
 .devices-actions { display: flex; align-items: center; gap: 10px; }
-.devices-table { min-width: 620px; }
+.devices-table { min-width: 720px; }
 .devices-table .button { white-space: nowrap; padding: 7px 10px; }
 .devices-table .button.active { background: #e6f3e9; color: #276b42; border-color: #aed6ba; }
 .devices-table td:last-child { text-align: left; }
+.inline-note { border: 0; background: transparent; padding: 6px 2px; color: #9aa79d; font: inherit; text-align: left; cursor: pointer; }
+.inline-note.has-note { color: #315f47; font-weight: 600; }
+.inline-note:hover, .inline-note:focus-visible { color: #206d45; text-decoration: underline; }
+.note-input { width: 100%; min-width: 110px; box-sizing: border-box; }
 .device-state { display: inline-block; color: #7b8c81; background: #edf2ee; border-radius: 5px; padding: 5px 9px; font-size: 11px; }
 .device-state.active { color: #4b8d55; background: #e8f4e6; }
 .device-state.offline { color: #8c918d; background: #eef0ee; }
@@ -114,6 +118,12 @@ td, th { padding: 14px 9px; }
 td { border-bottom: 1px solid #eef2ee; font-size: 12px; }
 td code { color: #3f6b4f; font-size: 12px; }
 td:last-child { text-align: right; }
+.record-editable { cursor: text; }
+.record-editable:hover, .record-editable:focus-visible { background: #edf6ee; outline: none; }
+.record-editable:hover code { text-decoration: underline; text-decoration-style: dotted; }
+.record-input { width: 100%; min-width: 82px; box-sizing: border-box; }
+.record-actions { display: flex; gap: 5px; justify-content: flex-end; }
+.record-actions .button { padding: 7px 9px; white-space: nowrap; }
 .delete-button { border: 0; color: #b46757; background: #fbefeb; padding: 7px 10px; border-radius: 5px; font-size: 11px; }
 .empty-row { color: #9aa79d; padding: 23px 9px; }
 .subtle { color: #98a59b; font-size: 11px; line-height: 1.7; margin-top: 16px; }

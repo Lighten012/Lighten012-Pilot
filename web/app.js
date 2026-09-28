@@ -95,13 +95,13 @@ function renderNetwork(state) {
   loadDevices();
 }
 
-function renderDevices(devices, fullDevices = {}) {
+function renderDevices(devices, fullDevices = {}, notes = {}) {
   const body = $("devices");
   body.replaceChildren();
   $("device-count").textContent = `${devices.filter((device) => device.state === "ONLINE").length} 在线 / ${devices.length} 已知`;
   if (!devices.length) {
     const row = node("tr", "", ""), cell = node("td", "empty-row", "暂未发现 LAN 设备，设备通信后可刷新查看。");
-    cell.colSpan = 4;
+    cell.colSpan = 5;
     row.append(cell);
     body.append(row);
     return;
@@ -114,6 +114,40 @@ function renderDevices(devices, fullDevices = {}) {
       cell.append(node("code", "", value));
       row.append(cell);
     }
+    const noteCell = node("td", "", "");
+    const noteButton = node("button", `inline-note${notes[device.mac] ? " has-note" : ""}`, notes[device.mac] || "点击添加备注");
+    noteButton.type = "button";
+    noteButton.title = "点击修改设备备注";
+    noteButton.onclick = () => {
+      const input = node("input", "note-input", "");
+      input.value = notes[device.mac] || "";
+      input.maxLength = 64;
+      input.placeholder = "设备名称或用途";
+      noteCell.replaceChildren(input);
+      input.focus();
+      input.select();
+      let finished = false;
+      const finish = async (save) => {
+        if (finished) return;
+        finished = true;
+        if (save && input.value.trim() !== (notes[device.mac] || "")) {
+          try {
+            notes = await request(`/api/lan/device-notes/${encodeURIComponent(device.mac)}`, mutation("PUT", { note: input.value.trim() }));
+            noteButton.textContent = notes[device.mac] || "点击添加备注";
+            noteButton.classList.toggle("has-note", Boolean(notes[device.mac]));
+            message("devices-message", "设备备注已保存");
+          } catch (error) { message("devices-message", error.message, true); }
+        }
+        noteCell.replaceChildren(noteButton);
+      };
+      input.onblur = () => finish(true);
+      input.onkeydown = (event) => {
+        if (event.key === "Enter") { event.preventDefault(); input.blur(); }
+        if (event.key === "Escape") { event.preventDefault(); finished = true; noteCell.replaceChildren(noteButton); }
+      };
+    };
+    noteCell.append(noteButton);
+    row.append(noteCell);
     const stateCell = node("td", "", "");
     stateCell.append(node("span", `device-state${device.state === "ONLINE" ? " active" : device.state === "OFFLINE" ? " offline" : device.state === "MISMATCH" ? " mismatch" : ""}`, labels[device.state] || device.state));
     row.append(stateCell);
@@ -142,8 +176,8 @@ async function loadDevices() {
   button.disabled = true;
   message("devices-message", "");
   try {
-    const [devices, fullDevices] = await Promise.all([request("/api/lan/devices"), request("/api/mihomo/devices")]);
-    renderDevices(devices, fullDevices);
+    const [devices, fullDevices, notes] = await Promise.all([request("/api/lan/devices"), request("/api/mihomo/devices"), request("/api/lan/device-notes")]);
+    renderDevices(devices, fullDevices, notes);
   } catch (error) {
     message("devices-message", error.message, true);
   } finally {
@@ -213,9 +247,14 @@ function renderRecords() {
   }
   records.forEach((record, index) => {
     const row = node("tr", "", "");
-    for (const value of [record.name, record.type, record.mac ? "跟随 DHCP" : record.value, record.mac || "—", String(record.ttl)]) {
-      const cell = node("td", "", "");
+    for (const [field, value] of [["域名", record.name], ["类型", record.type], ["地址", record.mac ? "跟随 DHCP" : record.value], ["服务端 MAC", record.mac || "—"], ["TTL", String(record.ttl)]]) {
+      const cell = node("td", "record-editable", "");
       cell.append(node("code", "", value));
+      cell.tabIndex = 0;
+      cell.setAttribute("role", "button");
+      cell.setAttribute("aria-label", `修改${field}：${value}`);
+      cell.onclick = () => editRecord(row, record, index);
+      cell.onkeydown = (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); editRecord(row, record, index); } };
       row.append(cell);
     }
     const cell = node("td", "", ""), button = node("button", "delete-button", "删除");
@@ -225,6 +264,56 @@ function renderRecords() {
     row.append(cell);
     body.append(row);
   });
+}
+
+function editRecord(row, record, index) {
+  if (row.classList.contains("editing")) return;
+  if (document.querySelector("#records tr.editing")) { message("message", "请先完成当前记录的修改", true); return; }
+  row.classList.add("editing");
+  const input = (value, placeholder = "") => {
+    const element = node("input", "record-input", "");
+    element.value = value;
+    element.placeholder = placeholder;
+    return element;
+  };
+  const name = input(record.name, "域名");
+  const type = node("select", "record-input", "");
+  for (const value of ["A", "AAAA"]) { const option = node("option", "", value); option.value = value; type.append(option); }
+  type.value = record.type;
+  const address = input(record.value || "", "IP 地址");
+  const mac = input(record.mac || "", "MAC 地址");
+  const ttl = input(String(record.ttl), "TTL");
+  ttl.type = "number"; ttl.min = "1"; ttl.max = "86400";
+  address.oninput = () => { if (address.value.trim()) mac.value = ""; };
+  mac.oninput = () => { if (mac.value.trim()) { address.value = ""; type.value = "A"; } };
+  type.onchange = () => { if (type.value === "AAAA") mac.value = ""; };
+  [name, type, address, mac, ttl].forEach((field, i) => row.cells[i].replaceChildren(field));
+  const actions = node("div", "record-actions", "");
+  const done = node("button", "button secondary", "完成"); done.type = "button";
+  const cancel = node("button", "button quiet", "取消"); cancel.type = "button";
+  cancel.onclick = renderRecords;
+  done.onclick = () => {
+    const updated = {
+      name: name.value.trim().replace(/\.$/, "").toLowerCase(), type: type.value,
+      value: address.value.trim(), mac: mac.value.trim().toLowerCase().replace(/-/g, ":"), ttl: Number(ttl.value)
+    };
+    if (!updated.name || !updated.ttl || updated.ttl > 86400 || (!updated.value && !updated.mac) || (updated.value && updated.mac)) {
+      message("message", "请填写有效的域名、地址或 MAC，以及 1–86400 秒的 TTL", true); return;
+    }
+    if (records.some((item, other) => other !== index && item.name === updated.name && item.type === updated.type)) {
+      message("message", "同一域名和类型只能有一条记录", true); return;
+    }
+    records[index] = updated;
+    renderRecords();
+    message("message", "记录已修改，点击下方“保存并应用”后生效");
+  };
+  actions.append(done, cancel);
+  row.cells[5].replaceChildren(actions);
+  for (const field of [name, type, address, mac, ttl]) field.onkeydown = (event) => {
+    if (event.key === "Enter") { event.preventDefault(); done.click(); }
+    if (event.key === "Escape") { event.preventDefault(); cancel.click(); }
+  };
+  name.focus(); name.select();
 }
 
 async function loadDNS() {
@@ -270,6 +359,12 @@ $("add-form").onsubmit = (event) => {
   message("message", "有未保存的修改");
 };
 $("save").onclick = async () => {
+  let editing = document.querySelector("#records tr.editing");
+  while (editing) {
+    editing.querySelector(".record-actions .button").click();
+    if (document.querySelector("#records tr.editing") === editing) return;
+    editing = document.querySelector("#records tr.editing");
+  }
   const button = $("save");
   button.disabled = true;
   try {

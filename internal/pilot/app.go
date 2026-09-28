@@ -27,6 +27,7 @@ type app struct {
 	resolver *dnsservice.Resolver
 	network  *network.Manager
 	mihomo   *mihomo.Client
+	notes    *deviceNotes
 	path     string
 	saveMu   sync.Mutex
 }
@@ -52,6 +53,29 @@ func (a *app) routes() http.Handler {
 		httpx.WriteJSON(w, http.StatusOK, interfaces)
 	})
 	if a.network != nil {
+		if a.notes != nil {
+			mux.HandleFunc("GET /api/lan/device-notes", func(w http.ResponseWriter, r *http.Request) {
+				httpx.WriteJSON(w, http.StatusOK, a.notes.all())
+			})
+			mux.HandleFunc("PUT /api/lan/device-notes/{mac}", func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("X-Pilot-Request") != "1" || !httpx.SameOrigin(r) {
+					http.Error(w, "请求来源无效", http.StatusForbidden)
+					return
+				}
+				var input struct {
+					Note string `json:"note"`
+				}
+				if err := httpx.DecodeRequest(w, r, &input); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				if err := a.notes.set(r.PathValue("mac"), input.Note); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				httpx.WriteJSON(w, http.StatusOK, a.notes.all())
+			})
+		}
 		mux.HandleFunc("GET /api/lan/devices", func(w http.ResponseWriter, r *http.Request) {
 			devices, err := a.network.LANDevices()
 			if err != nil {
@@ -190,6 +214,10 @@ func Run(assets fs.FS) {
 	if err != nil {
 		log.Fatalf("load network roles: %v", err)
 	}
+	notes, err := loadDeviceNotes(filepath.Join(filepath.Dir(*networkConfig), "device-notes.json"))
+	if err != nil {
+		log.Fatalf("load LAN device notes: %v", err)
+	}
 	dnsService := dnsservice.NewService(r, *dnsPort)
 	dhcpService := dhcp.NewService(*dhcpLeases, *dhcpPort)
 	r.SetIPForMAC(dhcpService.IPForMAC)
@@ -222,7 +250,7 @@ func Run(assets fs.FS) {
 		change.Commit()
 		dhcpChange.Commit()
 	}
-	web := &http.Server{Addr: *webAddr, Handler: (&app{assets: assets, resolver: r, network: manager, mihomo: mihomo, path: *configPath}).routes(), ReadHeaderTimeout: 5 * time.Second}
+	web := &http.Server{Addr: *webAddr, Handler: (&app{assets: assets, resolver: r, network: manager, mihomo: mihomo, notes: notes, path: *configPath}).routes(), ReadHeaderTimeout: 5 * time.Second}
 	errCh := make(chan error, 1)
 	go func() { errCh <- web.ListenAndServe() }()
 	log.Printf("Pilot web http://%s; DNS follows selected LAN", *webAddr)

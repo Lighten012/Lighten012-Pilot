@@ -1,6 +1,6 @@
 # Lighten012-Pilot
 
-一个面向个人内网的轻量路由服务。网页可添加和删除自定义 A/AAAA 解析记录、设置首选与备用上游 DNS，也可选择一次 WAN/LAN 网卡、查看 LAN 设备并修改 LAN IPv4 地址。WAN 始终只读；LAN 经 WAN 的 IPv4 转发和 NAT 自动生效，LAN 提供最小 DHCPv4，不提供端口转发。DNS 只监听所选 LAN 网卡的 IPv4 地址，并只接受该 LAN 网段的客户端；LAN IP 修改后 DNS 会同步切换，WAN 不提供 DNS。未命中自定义记录的域名转发给上游（默认 `119.29.29.29`）；首选失败时尝试备用，两者至少填写一个。DNS 支持 UDP 和 TCP。
+一个面向个人内网的轻量路由服务。网页可添加、点击修改或删除自定义 A/AAAA 解析记录、设置首选与备用上游 DNS，也可选择一次 WAN/LAN 网卡、查看 LAN 设备、按 MAC 添加设备备注并修改 LAN IPv4 地址。WAN 始终只读；LAN 经 WAN 的 IPv4 转发和 NAT 自动生效，LAN 提供最小 DHCPv4，不提供端口转发。DNS 只监听所选 LAN 网卡的 IPv4 地址，并只接受该 LAN 网段的客户端；LAN IP 修改后 DNS 会同步切换，WAN 不提供 DNS。未命中自定义记录的域名转发给上游（默认 `119.29.29.29`）；首选失败时尝试备用，两者至少填写一个。DNS 支持 UDP 和 TCP。
 
 服务是一个 Go 程序，网页已经嵌入二进制文件。**可以在本机编译，服务器只运行编译结果**，无需安装 Go、Node.js 或放置源代码。
 
@@ -63,11 +63,11 @@ DHCPv4 只绑定所选 LAN 网卡；WAN 不响应。当前 `10.0.0.1/24` 的自�
 
 ## LAN 设备
 
-「LAN 设备」合并有效 DHCP 租约和 LAN 网卡的 IPv4 邻居记录，点击“重新探测”时通过 ARP 请求检查这些已知地址。页面显示在线、离线/未响应、MAC 不符或待确认，并优先采用当前租约的 MAC，避免旧邻居记录对应到错误设备。服务器需安装 `iputils-arping`。探测不会扫描整个网段；没有租约且未留在邻居表中的设备不会列出。休眠或过滤 ARP 的设备也可能显示为未响应。
+「LAN 设备」合并有效 DHCP 租约和 LAN 网卡的 IPv4 邻居记录，点击“重新探测”时通过 ARP 请求检查这些已知地址。页面显示在线、离线/未响应、MAC 不符或待确认，并优先采用当前租约的 MAC，避免旧邻居记录对应到错误设备。点击设备备注即可修改，按 Enter 或移开焦点立即保存；备注按 MAC 保存到 `/var/lib/lighten012-pilot/device-notes.json`，不会因 DHCP 换 IP 而丢失。服务器需安装 `iputils-arping`。探测不会扫描整个网段；没有租约且未留在邻居表中的设备不会列出。休眠或过滤 ARP 的设备也可能显示为未响应。
 
 ## 按设备 MAC 解析
 
-添加 DNS 记录时可选择「LAN 设备」，填入作为服务端的设备 MAC（例如 `aa:bb:cc:dd:ee:ff`）。Pilot 根据该 MAC 查询自己发放的有效 DHCP 租约，将域名解析为设备当前 LAN IPv4。所有 LAN 客户端得到相同的结果；设备换地址后取得新租约，解析结果也会跟着改变。此模式只支持 A 记录，每个域名和类型只能有一条记录；把已有固定记录改成设备绑定时，先删除旧记录，再添加新记录并保存。
+添加 DNS 记录时可选择「LAN 设备」，填入作为服务端的设备 MAC（例如 `aa:bb:cc:dd:ee:ff`）。Pilot 根据该 MAC 查询自己发放的有效 DHCP 租约，将域名解析为设备当前 LAN IPv4。所有 LAN 客户端得到相同的结果；设备换地址后取得新租约，解析结果也会跟着改变。此模式只支持 A 记录，每个域名和类型只能有一条记录。点击已有记录的任意字段可直接编辑域名、类型、固定 IP 或服务端 MAC、TTL；完成后点击页面下方“保存并应用”。
 
 设备必须从 Pilot 获取 DHCP 地址；手动配置 IP 或使用其他 DHCP 服务时，Pilot 无法从租约找到它，A 查询会返回 SERVFAIL，避免指向旧地址。客户端应直接使用 Pilot 的 LAN DNS；若经过其他 DNS 代理或缓存，旧答案可能在 TTL 期间继续出现。固定 IP 模式仍可用于不需要跟随 DHCP 的记录。
 
@@ -82,7 +82,7 @@ nslookup example.com 10.0.0.1
 
 第一条验证自定义记录，第二条验证上游转发。自定义记录只做**精确域名匹配**；同一域名的其他查询类型返回空答案，不会意外转发到上游。
 
-接口：`GET /api/state` 读取 DNS 配置和计数；`GET /api/interfaces` 只读网卡列表；`GET /api/network` 读取 WAN/LAN 选择；`GET /api/lan/devices` 读取 LAN 邻居表；`PUT /api/network/roles` 保存接口角色；`PUT /api/network/lan-ip` 修改 LAN IPv4；`PUT /api/config` 保存 DNS 配置。修改请求需带 `X-Pilot-Request: 1` 请求头，网页会自动处理。
+接口：`GET /api/state` 读取 DNS 配置和计数；`GET /api/interfaces` 只读网卡列表；`GET /api/network` 读取 WAN/LAN 选择；`GET /api/lan/devices` 读取 LAN 邻居表；`GET /api/lan/device-notes` 与 `PUT /api/lan/device-notes/{mac}` 读取、保存设备备注（空备注会删除）；`PUT /api/network/roles` 保存接口角色；`PUT /api/network/lan-ip` 修改 LAN IPv4；`PUT /api/config` 保存 DNS 配置。修改请求需带 `X-Pilot-Request: 1` 请求头，网页会自动处理。
 
 ## Mihomo 管理模块
 
